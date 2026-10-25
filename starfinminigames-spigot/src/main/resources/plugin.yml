@@ -1,0 +1,16 @@
+name: StarfinMinigames
+version: 0.1.0-SNAPSHOT
+main: com.starfinplugins.minigames.spigot.StarfinMinigamesPlugin
+author: StarfinPlugins
+description: Shared read-only minigame registry for Spigot 1.8.8
+softdepend:
+  - StarfinCore
+commands:
+  sminigames:
+    description: Shared minigame registry diagnostics
+    usage: /sminigames <status|list|info|reload>
+    permission: starfinminigames.admin
+permissions:
+  starfinminigames.admin:
+    description: Inspect and reload the shared minigame registry
+    default: op

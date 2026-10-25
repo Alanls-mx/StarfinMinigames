@@ -1,0 +1,3 @@
+# Identificador estavel deste servidor Spigot na rede. Altere antes de publicar.
+# Se o StarfinBedWars usar network.yml, configure o mesmo server-id nos dois plugins.
+server-id: local-01
