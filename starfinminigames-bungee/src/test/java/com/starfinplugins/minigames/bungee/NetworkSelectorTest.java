@@ -24,6 +24,15 @@ public class NetworkSelectorTest {
             "bedwars", "solo", false, 30000).getArenaId());
     }
 
+    @Test public void selectsOpeningArenaForDirectSpawnReplacement() {
+        NetworkArenaSnapshot opening = arena("island", "solo", "OPENING", 1, 2, true, NOW);
+        assertEquals("island", NetworkSelector.choose(directory(true, NOW, opening), allowed(),
+            "bedwars", "solo", true, 30000).getArenaId());
+        NetworkArenaSnapshot closed = arena("island", "solo", "OPENING", 2, 2, true, NOW);
+        assertNull(NetworkSelector.choose(directory(true, NOW, closed), allowed(),
+            "bedwars", "solo", true, 30000));
+    }
+
     @Test public void filtersExpiredOfflineUnknownOrWrongInstance() {
         NetworkArenaSnapshot arena = arena("a", "solo", "AVAILABLE", 0, 2, true, NOW);
         assertNull(NetworkSelector.choose(directory(true, NOW - 30001, arena), allowed(),

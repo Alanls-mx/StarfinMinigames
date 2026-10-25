@@ -49,6 +49,6 @@ public final class NetworkArenaSnapshot {
     public boolean isAvailable() {
         return enabled && !editing && joinable && players < capacity
             && ("AVAILABLE".equalsIgnoreCase(state) || "WAITING".equalsIgnoreCase(state)
-                || "STARTING".equalsIgnoreCase(state));
+                || "STARTING".equalsIgnoreCase(state) || "OPENING".equalsIgnoreCase(state));
     }
 }
