@@ -1,0 +1,5 @@
+name: StarfinMinigames
+main: com.starfinplugins.minigames.bungee.StarfinMinigamesBungee
+version: 0.1.0-SNAPSHOT
+author: StarfinPlugins
+description: Descoberta e reservas de minigames na rede StarfinPlugins.

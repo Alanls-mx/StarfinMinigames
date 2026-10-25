@@ -4,7 +4,7 @@ import java.util.UUID;
 
 /** Player identity and current role; display names are deliberately not keys. */
 public final class MinigamePlayerSnapshot {
-    public enum Role { PLAYER, SPECTATOR }
+    public enum Role { PLAYER, RESPAWNING, ELIMINATED, SPECTATOR, DISCONNECTED }
 
     private final UUID playerId, matchId;
     private final String minigameId, arenaId, serverId;

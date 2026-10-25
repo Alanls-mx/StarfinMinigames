@@ -1,0 +1,30 @@
+network:
+  enabled: false
+  network-id: starfin-network
+  lobby-server: auth
+  server-timeout-seconds: 30
+  servers:
+    bedwars-01: survival
+mysql:
+  enabled: false
+  host: localhost
+  port: 3306
+  database: starfin
+  username: root
+  password: ''
+  ssl-mode: PREFERRED
+matchmaking:
+  enabled: true
+  reservation-timeout-seconds: 15
+  prefer-existing-matches: true
+messages:
+  prefix: '&b&lStarfin &8» '
+  matchmaking-unavailable: '&cMatchmaking indisponivel neste momento.'
+  search-in-progress: '&eJa existe uma busca em andamento.'
+  transfer-pending: '&eJa existe uma transferencia pendente para voce.'
+  catalog-error: '&cNao foi possivel consultar as partidas agora.'
+  arena-unavailable: '&eNenhuma arena disponivel para {game} {mode}.'
+  destination-unavailable: '&cDestino indisponivel ou voce ja esta nesse servidor.'
+  connection-failed: '&cNao foi possivel conectar ao servidor da partida.'
+  connecting: '&aConectando a arena {arena}...'
+  proxy-busy: '&cO proxy esta ocupado. Tente novamente em instantes.'
