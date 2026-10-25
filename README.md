@@ -127,3 +127,4 @@ O teste SQL de concorrência usa um schema **descartável** informado por `SM_TE
 ### Limites desta fase
 
 O proxy possui adaptador para BedWars; SkyWars/Murder precisam publicar catálogo e implementar seu próprio adaptador. A reserva protege concorrência entre requisições do proxy, mas entradas locais ainda exigem validação final no BedWars. Não há Party nem reserva em lote. UUID da instância muda a cada inicialização; `server-id`, IDs de jogo, arena e modalidade são estáveis. A API não agrega XP nem perfis: esses dados permanecem no MySQL existente do BedWars.
+`network-id` é um identificador administrativo nesta versão; o catálogo legado `sbw_network_*` não possui essa coluna. Use um schema MySQL exclusivo por rede para impedir mistura de redes distintas.
