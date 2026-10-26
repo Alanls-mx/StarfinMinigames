@@ -1,6 +1,6 @@
 # StarfinMinigames — Fase 1.2
 
-API compartilhada e primeira versão do roteamento BungeeCord para Java 8 e Spigot/PaperSpigot 1.8.8. Party, amizades, clãs, ranqueadas e campeonatos permanecem fora deste módulo.
+API compartilhada e roteamento BungeeCord para Java 8 e Spigot/PaperSpigot 1.8.8. A entrada em partida de uma Party integra opcionalmente o StarfinSocial no proxy; amizades, clãs, ranqueadas e campeonatos permanecem fora deste módulo.
 
 ## Módulos e responsabilidades
 
@@ -114,6 +114,10 @@ Permissão `starfinminigames.admin` (operador por padrão):
 
 `/smjoin bedwars [solo|duo|trio|squad]` consulta anúncios recentes, verifica o heartbeat e a instância UUID, prioriza partida aguardando com vaga e reserva uma posição sob bloqueio transacional de servidor e arena. A reserva guarda UUID do jogador, jogo, modalidade, servidor, instância, arena, estado e validade. O proxy transfere pela API nativa BungeeCord. Na chegada, o BedWars reivindica a reserva por UUID no MySQL, solicita entrada ao `MatchEngineService` e confirma **somente após** o evento de entrada efetiva. Falhas e expiração liberam a vaga; a admissão local continua verificando capacidade e estado real. A entrega pelo banco funciona mesmo com servidor inicialmente vazio. Reservas não substituem a reconexão BedWars.
 
+Com StarfinSocial instalado no mesmo proxy, `/smjoin` detecta a Party. Somente o líder inicia a busca; membros online precisam estar no mesmo proxy e no lobby configurado. Membros offline não participam da transferência. Todas as vagas do grupo são reservadas para a **mesma arena em uma transação**, e a revisão da Party é conferida novamente antes das conexões. Se não houver capacidade para todos, ninguém é transferido. A conexão Bungee de cada membro ainda pode falhar individualmente depois da reserva; nesses casos as reservas com falha são liberadas e o líder recebe um aviso. O plugin não decide a equipe dentro da arena: o BedWars continua responsável pela distribuição de times.
+
+Para compilar a integração, instale primeiro a API do projeto vizinho com `mvn -B -pl starfinsocial-api -am install` na pasta StarfinSocial e depois compile StarfinMinigames. `StarfinSocial` é uma dependência opcional em `bungee.yml`; sem ele, `/smjoin` mantém a entrada individual.
+
 O comando administrativo `/smnetwork <status|servers|games|arenas|players|reload>` requer `starfinminigames.admin`. `reload` aplica mensagens e limites de matchmaking; mudanças de identidade, servidor ou MySQL requerem reinício. `/smjoin` aceita jogadores. A configuração do proxy inclui prefixo de mensagens; detalhes de banco e senha nunca são enviados ao jogador.
 
 ### Atualização e homologação
@@ -126,5 +130,5 @@ O teste SQL de concorrência usa um schema **descartável** informado por `SM_TE
 
 ### Limites desta fase
 
-O proxy possui adaptador para BedWars; SkyWars/Murder precisam publicar catálogo e implementar seu próprio adaptador. A reserva protege concorrência entre requisições do proxy, mas entradas locais ainda exigem validação final no BedWars. Não há Party nem reserva em lote. UUID da instância muda a cada inicialização; `server-id`, IDs de jogo, arena e modalidade são estáveis. A API não agrega XP nem perfis: esses dados permanecem no MySQL existente do BedWars.
+O proxy possui adaptador para BedWars; SkyWars/Murder precisam publicar catálogo e implementar seu próprio adaptador. A reserva protege concorrência entre requisições do proxy, mas entradas locais ainda exigem validação final no BedWars. UUID da instância muda a cada inicialização; `server-id`, IDs de jogo, arena e modalidade são estáveis. A API não agrega XP nem perfis: esses dados permanecem no MySQL existente do BedWars.
 `network-id` é um identificador administrativo nesta versão; o catálogo legado `sbw_network_*` não possui essa coluna. Use um schema MySQL exclusivo por rede para impedir mistura de redes distintas.

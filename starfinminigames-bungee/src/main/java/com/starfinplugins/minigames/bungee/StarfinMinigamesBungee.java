@@ -4,6 +4,7 @@ import com.starfinplugins.minigames.api.ReservationSnapshot;
 import java.io.IOException;
 import java.sql.SQLException;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -113,6 +114,19 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
     }
 
     void requestJoin(ProxiedPlayer player, String game, String mode) {
+        if (getProxy().getPluginManager().getPlugin("StarfinSocial") != null) {
+            try { PartyJoinBridge.request(this, player, game, mode); }
+            catch (LinkageError | RuntimeException error) {
+                getLogger().warning("Integracao com StarfinSocial indisponivel ("
+                    + error.getClass().getSimpleName() + ").");
+                sendKey(player, "party-unavailable", "&cNao foi possivel consultar sua Party.");
+            }
+            return;
+        }
+        requestSoloJoin(player, game, mode);
+    }
+
+    void requestSoloJoin(ProxiedPlayer player, String game, String mode) {
         BungeeSettings active = settings;
         if (!active.networkEnabled || !active.matchmakingEnabled || database == null) {
             sendKey(player, "matchmaking-unavailable", "&cMatchmaking indisponivel neste momento.");
@@ -171,12 +185,38 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
         }
     }
 
-    private void fail(ReservationSnapshot reservation, boolean pendingOnly) {
+    void fail(ReservationSnapshot reservation, boolean pendingOnly) {
         BungeeDatabase db = database;
         if (db == null) return;
         try { if (pendingOnly) db.failPendingOnly(reservation); else db.fail(reservation); }
         catch (SQLException error) { getLogger().warning("Nao foi possivel liberar uma reserva; ela expirara."); }
     }
+
+    boolean acquireGroup(List<UUID> members) {
+        java.util.List<UUID> acquired = new java.util.ArrayList<UUID>();
+        for (UUID id : members) {
+            if (!inFlight.add(id)) {
+                for (UUID previous : acquired) inFlight.remove(previous);
+                return false;
+            }
+            acquired.add(id);
+        }
+        return true;
+    }
+
+    void releaseGroup(List<UUID> members) {
+        for (UUID id : members) inFlight.remove(id);
+    }
+
+    void trackTransfer(UUID player, ReservationSnapshot reservation) {
+        transfers.put(player, reservation);
+    }
+
+    void clearTransfer(UUID player, ReservationSnapshot reservation) {
+        if (transfers.remove(player, reservation)) inFlight.remove(player);
+    }
+
+    void releaseFlight(UUID player) { inFlight.remove(player); }
 
     @EventHandler public void onDisconnect(PlayerDisconnectEvent event) {
         UUID id = event.getPlayer().getUniqueId();

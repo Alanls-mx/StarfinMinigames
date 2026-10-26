@@ -8,6 +8,8 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.UUID;
+import java.util.List;
+import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -22,11 +24,14 @@ import static org.junit.Assert.*;
 public class BungeeDatabaseIntegrationTest {
     @Test public void concurrentReservationsRespectLastSlotAndClaimRequiresCorrectInstance() throws Exception {
         String host = System.getenv("SM_TEST_MYSQL_HOST");
+        String port = System.getenv("SM_TEST_MYSQL_PORT");
         String schema = System.getenv("SM_TEST_MYSQL_DATABASE");
         String user = System.getenv("SM_TEST_MYSQL_USER");
         String password = System.getenv("SM_TEST_MYSQL_PASSWORD");
         Assume.assumeTrue("requires disposable MySQL schema", host != null && schema != null && user != null);
-        String url = "jdbc:mysql://" + host + "/" + schema + "?sslMode=DISABLED";
+        int mysqlPort = port == null ? 3306 : Integer.parseInt(port);
+        String url = "jdbc:mysql://" + host + ":" + mysqlPort + "/" + schema
+            + "?sslMode=DISABLED&allowPublicKeyRetrieval=true";
         String serverId = "test-" + UUID.randomUUID().toString().substring(0, 8);
         UUID instance = UUID.randomUUID();
         long now = System.currentTimeMillis();
@@ -62,6 +67,7 @@ public class BungeeDatabaseIntegrationTest {
         yaml.set("network.servers." + serverId, "survival");
         yaml.set("mysql.enabled", true);
         yaml.set("mysql.host", host);
+        yaml.set("mysql.port", mysqlPort);
         yaml.set("mysql.database", schema);
         yaml.set("mysql.username", user);
         yaml.set("mysql.password", password == null ? "" : password);
@@ -69,6 +75,7 @@ public class BungeeDatabaseIntegrationTest {
         BungeeSettings settings = new BungeeSettings(yaml, name -> true);
         ExecutorService workers = Executors.newFixedThreadPool(2);
         ReservationSnapshot winner = null;
+        List<ReservationSnapshot> partyRows = java.util.Collections.emptyList();
         try (BungeeDatabase database = new BungeeDatabase(settings)) {
             CountDownLatch start = new CountDownLatch(1);
             Future<ReservationSnapshot> first = workers.submit(() -> {
@@ -94,6 +101,34 @@ public class BungeeDatabaseIntegrationTest {
                 assertFalse(ReservationJdbc.finish(connection, winner.getId(), winner.getPlayerId(),
                     ReservationState.CONFIRMED, System.currentTimeMillis()));
             }
+            try (Connection connection = DriverManager.getConnection(url, user, password);
+                 PreparedStatement insert = connection.prepareStatement(
+                    "INSERT INTO sbw_network_arenas VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
+                insert.setString(1,serverId); insert.setString(2,"party");
+                insert.setString(3,"SOLO"); insert.setString(4,"default");
+                insert.setString(5,"AVAILABLE"); insert.setString(6,null);
+                insert.setInt(7,0); insert.setInt(8,2);
+                insert.setBoolean(9,true); insert.setBoolean(10,false);
+                insert.setBoolean(11,true); insert.setLong(12,System.currentTimeMillis());
+                insert.setLong(13,0); insert.executeUpdate();
+            }
+            UUID memberA = UUID.randomUUID(), memberB = UUID.randomUUID(), memberC = UUID.randomUUID();
+            assertTrue("no partial Party reservation if capacity is too small",
+                database.reserveGroup(Arrays.asList(memberA,memberB,memberC),"bedwars","solo").isEmpty());
+            try (Connection connection = DriverManager.getConnection(url,user,password);
+                 PreparedStatement count = connection.prepareStatement(
+                    "SELECT COUNT(*) FROM sm_network_reservations WHERE player_uuid IN (?,?,?)")) {
+                count.setString(1,memberA.toString()); count.setString(2,memberB.toString());
+                count.setString(3,memberC.toString());
+                try (java.sql.ResultSet rows = count.executeQuery()) {
+                    rows.next(); assertEquals(0,rows.getInt(1));
+                }
+            }
+            partyRows = database.reserveGroup(Arrays.asList(memberA,memberB),"bedwars","solo");
+            assertEquals(2,partyRows.size());
+            assertEquals("party",partyRows.get(0).getArenaId());
+            assertEquals(partyRows.get(0).getArenaId(),partyRows.get(1).getArenaId());
+            assertEquals(partyRows.get(0).getServerInstance(),partyRows.get(1).getServerInstance());
         } finally {
             workers.shutdownNow();
             try (Connection connection = DriverManager.getConnection(url, user, password)) {
@@ -101,6 +136,11 @@ public class BungeeDatabaseIntegrationTest {
                         "DELETE FROM sm_network_reservations WHERE reservation_id=?")) {
                     cleanup.setString(1, winner.getId().toString()); cleanup.executeUpdate();
                 }
+                for (ReservationSnapshot row : partyRows)
+                    try (PreparedStatement cleanup = connection.prepareStatement(
+                            "DELETE FROM sm_network_reservations WHERE reservation_id=?")) {
+                        cleanup.setString(1,row.getId().toString()); cleanup.executeUpdate();
+                    }
                 try (PreparedStatement cleanup = connection.prepareStatement(
                         "DELETE FROM sbw_network_arenas WHERE server_id=?")) {
                     cleanup.setString(1, serverId); cleanup.executeUpdate();

@@ -14,6 +14,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.UUID;
 
 /** All methods block and must be called only by the proxy's bounded I/O executor. */
@@ -65,6 +68,77 @@ final class BungeeDatabase implements AutoCloseable {
             if (row != null) return row;
         }
         return null;
+    }
+
+    /** Reserve one arena for the whole Party, or none. The arena lock serializes capacity checks. */
+    List<ReservationSnapshot> reserveGroup(List<UUID> playerIds, String gameId, String mode)
+            throws SQLException {
+        if (playerIds == null || playerIds.isEmpty() || playerIds.size() > 64
+                || playerIds.contains(null) || new HashSet<UUID>(playerIds).size() != playerIds.size())
+            throw new IllegalArgumentException("Grupo invalido");
+        if (!bedwars.gameId().equalsIgnoreCase(gameId)) return Collections.emptyList();
+        List<UUID> ordered = new ArrayList<UUID>(playerIds);
+        Collections.sort(ordered);
+        NetworkDirectorySnapshot directory = directory();
+        List<NetworkArenaSnapshot> options = NetworkSelector.options(directory, settings.serverNames,
+            gameId, mode, settings.preferExisting, settings.serverTimeoutSeconds * 1000L);
+        for (NetworkArenaSnapshot option : options) {
+            List<ReservationSnapshot> rows = tryReserveGroup(ordered, option);
+            if (!rows.isEmpty()) return rows;
+        }
+        return Collections.emptyList();
+    }
+
+    private List<ReservationSnapshot> tryReserveGroup(List<UUID> players,
+                                                       NetworkArenaSnapshot option) throws SQLException {
+        try (Connection connection = pool.getConnection()) {
+            connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+            connection.setAutoCommit(false);
+            try {
+                long now = System.currentTimeMillis();
+                NetworkArenaSnapshot arena = bedwars.lockArena(connection, option.getServerId(),
+                    option.getArenaId(), settings, now);
+                if (arena == null || !arena.isAvailable()
+                        || !arena.getInstanceId().equals(option.getInstanceId())
+                        || !arena.getMode().equalsIgnoreCase(option.getMode())
+                        || arena.getUpdatedAtMillis() > now
+                        || now - arena.getUpdatedAtMillis() > settings.serverTimeoutSeconds * 1000L) {
+                    connection.rollback(); return Collections.emptyList();
+                }
+                NetworkServerSnapshot server = ((BedWarsCatalogAdapter) bedwars)
+                    .readServer(connection, arena.getServerId(), false);
+                if (server == null || !server.getInstanceId().equals(arena.getInstanceId())
+                        || !server.isAvailable(now, settings.serverTimeoutSeconds * 1000L)
+                        || server.getPlayers() + countActive(connection, arena.getServerId(), null,
+                            arena.getInstanceId(), now) + players.size() > server.getCapacity()
+                        || arena.getPlayers() + countActive(connection, arena.getServerId(),
+                            arena.getArenaId(), arena.getInstanceId(), now) + players.size()
+                            > arena.getCapacity()) {
+                    connection.rollback(); return Collections.emptyList();
+                }
+                List<ReservationSnapshot> rows = new ArrayList<ReservationSnapshot>();
+                List<Boolean> existing = new ArrayList<Boolean>();
+                for (UUID player : players) {
+                    ReservationSnapshot previous = ReservationJdbc.findForPlayer(connection,
+                        player, true);
+                    if (previous != null && (previous.getState() == ReservationState.PENDING
+                            || previous.getState() == ReservationState.CLAIMED)
+                            && previous.getExpiresAtMillis() > now)
+                        throw new IllegalStateException("Transferencia de membro pendente");
+                    existing.add(previous != null);
+                    rows.add(new ReservationSnapshot(UUID.randomUUID(), player,
+                        arena.getMinigameId(), arena.getMode(), arena.getServerId(),
+                        arena.getInstanceId(), arena.getArenaId(), ReservationState.PENDING,
+                        now, now + settings.reservationTimeoutSeconds * 1000L));
+                }
+                for (int i = 0; i < rows.size(); i++)
+                    ReservationJdbc.save(connection, rows.get(i), existing.get(i), now);
+                connection.commit();
+                return rows;
+            } catch (SQLException | RuntimeException error) {
+                connection.rollback(); throw error;
+            } finally { connection.setAutoCommit(true); }
+        }
     }
 
     private ReservationSnapshot tryReserve(UUID playerId, NetworkArenaSnapshot option) throws SQLException {
