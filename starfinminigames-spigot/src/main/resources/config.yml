@@ -5,3 +5,4 @@ server-id: local-01
 # Ative no servidor de lobby principal para impedir perda de fome fora das partidas.
 lobby:
   prevent-hunger: false
+  level-spawn-view: false

@@ -161,3 +161,4 @@ O proxy possui adaptador para BedWars; SkyWars/Murder precisam publicar catálog
 ### Fome no lobby principal
 
 No servidor Spigot dedicado ao lobby principal, configure `lobby.prevent-hunger: true` em `plugins/StarfinMinigames/config.yml`. A opção restaura a barra de fome ao entrar e impede que ela diminua. Deixe-a desativada em servidores de jogo que já controlam a fome por partida.
+Ative também `lobby.level-spawn-view: true` para nivelar a visão ao entrar, renascer ou ser teleportado por outro plugin ao lobby; a direção horizontal permanece configurada.
