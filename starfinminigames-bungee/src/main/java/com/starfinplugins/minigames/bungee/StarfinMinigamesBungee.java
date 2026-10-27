@@ -114,7 +114,7 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
     }
 
     void requestJoin(ProxiedPlayer player, String game, String mode) {
-        if (getProxy().getPluginManager().getPlugin("StarfinSocial") != null) {
+        if (settings.partyEnabled && getProxy().getPluginManager().getPlugin("StarfinSocial") != null) {
             try { PartyJoinBridge.request(this, player, game, mode); }
             catch (LinkageError | RuntimeException error) {
                 getLogger().warning("Integracao com StarfinSocial indisponivel ("

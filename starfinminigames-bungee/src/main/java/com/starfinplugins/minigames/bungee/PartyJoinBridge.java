@@ -51,6 +51,11 @@ final class PartyJoinBridge {
                 if (plan.onlineMembers.size() == 1) {
                     plugin.requestSoloJoin(leader,game,mode); return;
                 }
+                if (!plugin.settings().allowSoloParty && "solo".equalsIgnoreCase(mode)) {
+                    plugin.sendKey(leader,"party-solo-disabled",
+                        "&eParties nao podem entrar juntas no modo Solo.");
+                    return;
+                }
                 Map<UUID,ProxiedPlayer> members = localMembers(plugin,plan.onlineMembers);
                 if (members == null) {
                     plugin.sendKey(leader,"party-members-unavailable",
@@ -106,10 +111,16 @@ final class PartyJoinBridge {
         try {
             BungeeDatabase db = plugin.database();
             if (db == null) throw new IllegalStateException("Catalogo indisponivel");
-            rows = db.reserveGroup(ids,game,mode);
+            rows = db.reserveGroup(ids,game,mode,plan.partyId,plan.revision,
+                leader.getUniqueId());
             if (rows.isEmpty()) {
-                plugin.sendKey(leader,"party-arena-unavailable",
-                    "&eNenhuma arena tem vagas para toda a Party neste modo.");
+                int capacity = db.maximumTeamSize(game,mode);
+                if (capacity > 1 && capacity < ids.size())
+                    plugin.sendKey(leader,"party-oversized",
+                        "&cSua Party possui {size} jogadores, mas cada equipe suporta no maximo {capacity}.",
+                        "size",Integer.toString(ids.size()),"capacity",Integer.toString(capacity));
+                else plugin.sendKey(leader,"party-no-team",
+                    "&cNao existe uma equipe com vagas suficientes para sua Party.");
                 plugin.releaseGroup(ids); return;
             }
             ReservationSnapshot first = rows.get(0);
@@ -129,31 +140,9 @@ final class PartyJoinBridge {
                     "&eA Party ou a conexao de um membro mudou. Tente novamente.");
                 return;
             }
-            AtomicInteger remaining = new AtomicInteger(rows.size());
-            AtomicBoolean failed = new AtomicBoolean();
-            for (ReservationSnapshot row : rows) {
-                UUID id = row.getPlayerId();
-                ProxiedPlayer player = members.get(id);
-                plugin.trackTransfer(id,row);
-                player.connect(destination,(connected,error) -> {
-                    if (error != null || !Boolean.TRUE.equals(connected)) {
-                        failed.set(true);
-                        plugin.clearTransfer(id,row);
-                        plugin.submitIo(() -> plugin.fail(row,false));
-                        if (plugin.proxy().getPlayer(id) == player)
-                            plugin.sendKey(player,"connection-failed",
-                                "&cNao foi possivel conectar ao servidor da partida.");
-                    } else {
-                        plugin.releaseFlight(id);
-                        plugin.sendKey(player,"connecting","&aConectando a arena {arena}...",
-                            "arena",row.getArenaId());
-                    }
-                    if (remaining.decrementAndGet() == 0 && failed.get()
-                            && plugin.proxy().getPlayer(leader.getUniqueId()) == leader)
-                        plugin.sendKey(leader,"party-transfer-partial",
-                            "&cUm membro nao conseguiu entrar. A Party permanece formada.");
-                });
-            }
+            if ("CANCEL_PENDING".equals(plugin.settings().partialTransferPolicy))
+                connectSequentially(plugin,leader,destination,rows,members,0);
+            else connectIndependently(plugin,leader,destination,rows,members);
         } catch (Exception error) {
             for (ReservationSnapshot row : rows) plugin.fail(row,false);
             plugin.releaseGroup(ids);
@@ -161,6 +150,82 @@ final class PartyJoinBridge {
                 + error.getClass().getSimpleName() + ").");
             unavailable(plugin,leader);
         }
+    }
+
+    private static void connectSequentially(StarfinMinigamesBungee plugin, ProxiedPlayer leader,
+            ServerInfo destination, List<ReservationSnapshot> rows,
+            Map<UUID,ProxiedPlayer> members, int index) {
+        if (index >= rows.size()) return;
+        ReservationSnapshot row = rows.get(index);
+        UUID id = row.getPlayerId();
+        ProxiedPlayer player = members.get(id);
+        if (plugin.proxy().getPlayer(id) != player || player.getServer() == null
+                || !plugin.settings().lobbyServer.equals(player.getServer().getInfo().getName())) {
+            cancelUnattempted(plugin,rows,index);
+            notifyPartial(plugin,leader);
+            return;
+        }
+        plugin.trackTransfer(id,row);
+        player.connect(destination,(connected,error) -> {
+            if (error != null || !Boolean.TRUE.equals(connected)) {
+                plugin.clearTransfer(id,row);
+                plugin.submitIo(() -> plugin.fail(row,false));
+                cancelUnattempted(plugin,rows,index + 1);
+                if (plugin.proxy().getPlayer(id) == player)
+                    plugin.sendKey(player,"connection-failed",
+                        "&cNao foi possivel conectar ao servidor da partida.");
+                notifyPartial(plugin,leader);
+                return;
+            }
+            plugin.releaseFlight(id);
+            plugin.sendKey(player,"connecting","&aConectando a arena {arena}...",
+                "arena",row.getArenaId());
+            connectSequentially(plugin,leader,destination,rows,members,index + 1);
+        });
+    }
+
+    private static void cancelUnattempted(StarfinMinigamesBungee plugin,
+            List<ReservationSnapshot> rows, int fromIndex) {
+        plugin.submitIo(() -> {
+            for (int i = fromIndex; i < rows.size(); i++)
+                plugin.fail(rows.get(i),true);
+        });
+        for (int i = fromIndex; i < rows.size(); i++)
+            plugin.releaseFlight(rows.get(i).getPlayerId());
+    }
+
+    private static void connectIndependently(StarfinMinigamesBungee plugin, ProxiedPlayer leader,
+            ServerInfo destination, List<ReservationSnapshot> rows,
+            Map<UUID,ProxiedPlayer> members) {
+        AtomicInteger remaining = new AtomicInteger(rows.size());
+        AtomicBoolean failed = new AtomicBoolean();
+        for (ReservationSnapshot row : rows) {
+            UUID id = row.getPlayerId();
+            ProxiedPlayer player = members.get(id);
+            plugin.trackTransfer(id,row);
+            player.connect(destination,(connected,error) -> {
+                if (error != null || !Boolean.TRUE.equals(connected)) {
+                    failed.set(true);
+                    plugin.clearTransfer(id,row);
+                    plugin.submitIo(() -> plugin.fail(row,false));
+                    if (plugin.proxy().getPlayer(id) == player)
+                        plugin.sendKey(player,"connection-failed",
+                            "&cNao foi possivel conectar ao servidor da partida.");
+                } else {
+                    plugin.releaseFlight(id);
+                    plugin.sendKey(player,"connecting","&aConectando a arena {arena}...",
+                        "arena",row.getArenaId());
+                }
+                if (remaining.decrementAndGet() == 0 && failed.get())
+                    notifyPartial(plugin,leader);
+            });
+        }
+    }
+
+    private static void notifyPartial(StarfinMinigamesBungee plugin, ProxiedPlayer leader) {
+        if (plugin.proxy().getPlayer(leader.getUniqueId()) == leader)
+            plugin.sendKey(leader,"party-transfer-partial",
+                "&cUm membro nao conseguiu entrar. A Party permanece formada.");
     }
 
     private static void unavailable(StarfinMinigamesBungee plugin, ProxiedPlayer leader) {

@@ -8,13 +8,33 @@ public final class ReservationSnapshot {
     private final String minigameId, mode, serverId, arenaId;
     private final ReservationState state;
     private final long createdAtMillis, expiresAtMillis;
+    private final UUID groupId, partyId, leaderId;
+    private final long partyRevision;
+    private final int groupSize;
+    private final String teamId;
 
     public ReservationSnapshot(UUID id, UUID playerId, String minigameId, String mode,
                                String serverId, UUID serverInstance, String arenaId,
                                ReservationState state, long createdAtMillis, long expiresAtMillis) {
+        this(id, playerId, minigameId, mode, serverId, serverInstance, arenaId,
+            state, createdAtMillis, expiresAtMillis, null, null, null, 0L, 1, null);
+    }
+
+    public ReservationSnapshot(UUID id, UUID playerId, String minigameId, String mode,
+                               String serverId, UUID serverInstance, String arenaId,
+                               ReservationState state, long createdAtMillis, long expiresAtMillis,
+                               UUID groupId, UUID partyId, UUID leaderId, long partyRevision,
+                               int groupSize, String teamId) {
         if (id == null || playerId == null || serverInstance == null || state == null
-                || createdAtMillis < 0 || expiresAtMillis <= createdAtMillis)
+                || createdAtMillis < 0 || expiresAtMillis <= createdAtMillis
+                || groupSize < 1 || groupSize > 100 || (groupId == null && teamId != null))
             throw new IllegalArgumentException("invalid reservation");
+        this.groupId = groupId;
+        this.partyId = partyId;
+        this.leaderId = leaderId;
+        this.partyRevision = partyRevision;
+        this.groupSize = groupSize;
+        this.teamId = teamId;
         this.id = id;
         this.playerId = playerId;
         this.minigameId = Ids.stable(minigameId, "minigame id");
@@ -37,4 +57,10 @@ public final class ReservationSnapshot {
     public ReservationState getState() { return state; }
     public long getCreatedAtMillis() { return createdAtMillis; }
     public long getExpiresAtMillis() { return expiresAtMillis; }
+    public UUID getGroupId() { return groupId; }
+    public UUID getPartyId() { return partyId; }
+    public UUID getLeaderId() { return leaderId; }
+    public long getPartyRevision() { return partyRevision; }
+    public int getGroupSize() { return groupSize; }
+    public String getTeamId() { return teamId; }
 }

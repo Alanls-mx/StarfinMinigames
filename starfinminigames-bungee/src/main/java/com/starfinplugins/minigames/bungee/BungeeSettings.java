@@ -16,8 +16,10 @@ import net.md_5.bungee.config.YamlConfiguration;
 /** Validated proxy identity and explicit catalog-to-Bungee server allowlist. */
 final class BungeeSettings {
     final boolean networkEnabled, mysqlEnabled, matchmakingEnabled, preferExisting;
+    final boolean partyEnabled, allowSoloParty;
+    final String partialTransferPolicy;
     final String networkId, lobbyServer, mysqlHost, mysqlDatabase, mysqlUser, mysqlPassword, sslMode, prefix;
-    final int serverTimeoutSeconds, reservationTimeoutSeconds, mysqlPort;
+    final int serverTimeoutSeconds, reservationTimeoutSeconds, partyArrivalGraceSeconds, mysqlPort;
     final Map<String, String> serverNames;
     final Map<String, String> messages;
 
@@ -26,10 +28,15 @@ final class BungeeSettings {
         mysqlEnabled = yaml.getBoolean("mysql.enabled", false);
         matchmakingEnabled = yaml.getBoolean("matchmaking.enabled", true);
         preferExisting = yaml.getBoolean("matchmaking.prefer-existing-matches", true);
+        partyEnabled = yaml.getBoolean("party-matchmaking.enabled", true);
+        allowSoloParty = yaml.getBoolean("party-matchmaking.allow-solo-party", true);
+        partialTransferPolicy = yaml.getString("party-matchmaking.partial-transfer-policy",
+            "CANCEL_PENDING").trim().toUpperCase(java.util.Locale.ROOT);
         networkId = yaml.getString("network.network-id", "starfin-network").trim();
         lobbyServer = yaml.getString("network.lobby-server", "auth").trim();
         serverTimeoutSeconds = yaml.getInt("network.server-timeout-seconds", 30);
         reservationTimeoutSeconds = yaml.getInt("matchmaking.reservation-timeout-seconds", 15);
+        partyArrivalGraceSeconds = yaml.getInt("party-matchmaking.arrival-grace-seconds", 20);
         mysqlHost = yaml.getString("mysql.host", "localhost").trim();
         mysqlPort = yaml.getInt("mysql.port", 3306);
         mysqlDatabase = yaml.getString("mysql.database", "starfin").trim();
@@ -54,8 +61,11 @@ final class BungeeSettings {
             configuredMessages.put(key, messageSection.getString(key, ""));
         messages = Collections.unmodifiableMap(configuredMessages);
         if (!networkId.matches("[A-Za-z0-9_-]{1,64}") || serverTimeoutSeconds < 5
-                || serverTimeoutSeconds > 300 || reservationTimeoutSeconds < 5
+                || serverTimeoutSeconds > 300 || partyArrivalGraceSeconds < 5
+                || partyArrivalGraceSeconds > 120 || reservationTimeoutSeconds < 5
                 || reservationTimeoutSeconds > 120 || mysqlPort < 1 || mysqlPort > 65535
+                || !("CANCEL_PENDING".equals(partialTransferPolicy)
+                    || "CONTINUE".equals(partialTransferPolicy))
                 || !mysqlHost.matches("[A-Za-z0-9._:-]+")
                 || !mysqlDatabase.matches("[A-Za-z0-9_]+") || mysqlUser.isEmpty()
                 || !("DISABLED".equals(sslMode) || "PREFERRED".equals(sslMode)

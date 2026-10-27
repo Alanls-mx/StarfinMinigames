@@ -17,6 +17,11 @@ matchmaking:
   enabled: true
   reservation-timeout-seconds: 15
   prefer-existing-matches: true
+party-matchmaking:
+  enabled: true
+  allow-solo-party: true
+  arrival-grace-seconds: 20
+  partial-transfer-policy: CANCEL_PENDING
 messages:
   prefix: '&b&lStarfin &8» '
   matchmaking-unavailable: '&cMatchmaking indisponivel neste momento.'
@@ -34,3 +39,6 @@ messages:
   party-arena-unavailable: '&eNenhuma arena tem vagas para toda a Party neste modo.'
   party-changed: '&eA Party ou a conexao de um membro mudou. Tente novamente.'
   party-transfer-partial: '&cUm membro nao conseguiu entrar. A Party permanece formada.'
+  party-oversized: '&cSua Party possui {size} jogadores, mas cada equipe suporta no maximo {capacity}.'
+  party-no-team: '&cNao existe uma equipe com vagas suficientes para sua Party.'
+  party-solo-disabled: '&eParties nao podem entrar juntas no modo Solo.'

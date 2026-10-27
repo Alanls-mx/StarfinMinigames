@@ -73,6 +73,11 @@ final class BungeeDatabase implements AutoCloseable {
     /** Reserve one arena for the whole Party, or none. The arena lock serializes capacity checks. */
     List<ReservationSnapshot> reserveGroup(List<UUID> playerIds, String gameId, String mode)
             throws SQLException {
+        return reserveGroup(playerIds, gameId, mode, null, 0L, null);
+    }
+
+    List<ReservationSnapshot> reserveGroup(List<UUID> playerIds, String gameId, String mode,
+            UUID partyId, long revision, UUID leaderId) throws SQLException {
         if (playerIds == null || playerIds.isEmpty() || playerIds.size() > 64
                 || playerIds.contains(null) || new HashSet<UUID>(playerIds).size() != playerIds.size())
             throw new IllegalArgumentException("Grupo invalido");
@@ -83,14 +88,30 @@ final class BungeeDatabase implements AutoCloseable {
         List<NetworkArenaSnapshot> options = NetworkSelector.options(directory, settings.serverNames,
             gameId, mode, settings.preferExisting, settings.serverTimeoutSeconds * 1000L);
         for (NetworkArenaSnapshot option : options) {
-            List<ReservationSnapshot> rows = tryReserveGroup(ordered, option);
+            List<ReservationSnapshot> rows = tryReserveGroup(ordered, option,
+                partyId, revision, leaderId);
             if (!rows.isEmpty()) return rows;
         }
         return Collections.emptyList();
     }
 
+    int maximumTeamSize(String gameId, String mode) throws SQLException {
+        if (!bedwars.gameId().equalsIgnoreCase(gameId)) return 0;
+        NetworkDirectorySnapshot directory = directory();
+        int largest = 0;
+        for (NetworkArenaSnapshot option : NetworkSelector.options(directory, settings.serverNames,
+                gameId, mode, settings.preferExisting, settings.serverTimeoutSeconds * 1000L)) {
+            try (Connection connection = pool.getConnection()) {
+                largest = Math.max(largest, new TeamSlots(connection, option.getServerId(),
+                    option.getInstanceId().toString(), option.getArenaId(),
+                    System.currentTimeMillis()).maximum());
+            }
+        }
+        return largest;
+    }
+
     private List<ReservationSnapshot> tryReserveGroup(List<UUID> players,
-                                                       NetworkArenaSnapshot option) throws SQLException {
+            NetworkArenaSnapshot option, UUID partyId, long revision, UUID leaderId) throws SQLException {
         try (Connection connection = pool.getConnection()) {
             connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
             connection.setAutoCommit(false);
@@ -116,6 +137,17 @@ final class BungeeDatabase implements AutoCloseable {
                             > arena.getCapacity()) {
                     connection.rollback(); return Collections.emptyList();
                 }
+                TeamSlots slots = new TeamSlots(connection, arena.getServerId(),
+                    arena.getInstanceId().toString(), arena.getArenaId(), now);
+                boolean individualTeams = slots.maximum() == 1;
+                if (!individualTeams && players.size() > slots.maximum()) {
+                    connection.rollback(); return Collections.emptyList();
+                }
+                String commonTeam = individualTeams ? null : slots.assign(players.size());
+                if (!individualTeams && commonTeam == null) {
+                    connection.rollback(); return Collections.emptyList();
+                }
+                UUID groupId = UUID.randomUUID();
                 List<ReservationSnapshot> rows = new ArrayList<ReservationSnapshot>();
                 List<Boolean> existing = new ArrayList<Boolean>();
                 for (UUID player : players) {
@@ -126,10 +158,14 @@ final class BungeeDatabase implements AutoCloseable {
                             && previous.getExpiresAtMillis() > now)
                         throw new IllegalStateException("Transferencia de membro pendente");
                     existing.add(previous != null);
+                    String team = individualTeams ? slots.assign(1) : commonTeam;
+                    if (team == null) { connection.rollback(); return Collections.emptyList(); }
                     rows.add(new ReservationSnapshot(UUID.randomUUID(), player,
                         arena.getMinigameId(), arena.getMode(), arena.getServerId(),
                         arena.getInstanceId(), arena.getArenaId(), ReservationState.PENDING,
-                        now, now + settings.reservationTimeoutSeconds * 1000L));
+                        now, now + Math.max(settings.reservationTimeoutSeconds,
+                            settings.partyArrivalGraceSeconds) * 1000L,
+                        groupId, partyId, leaderId, revision, players.size(), team));
                 }
                 for (int i = 0; i < rows.size(); i++)
                     ReservationJdbc.save(connection, rows.get(i), existing.get(i), now);
@@ -176,10 +212,16 @@ final class BungeeDatabase implements AutoCloseable {
                     connection.rollback();
                     return null;
                 }
+                TeamSlots slots = new TeamSlots(connection, arena.getServerId(),
+                    arena.getInstanceId().toString(), arena.getArenaId(), now);
+                String team = slots.assign(1);
+                if (team == null) { connection.rollback(); return null; }
+                UUID groupId = UUID.randomUUID();
                 ReservationSnapshot row = new ReservationSnapshot(UUID.randomUUID(), playerId,
                     arena.getMinigameId(), arena.getMode(), arena.getServerId(),
                     arena.getInstanceId(), arena.getArenaId(), ReservationState.PENDING,
-                    now, now + settings.reservationTimeoutSeconds * 1000L);
+                    now, now + settings.reservationTimeoutSeconds * 1000L,
+                    groupId, null, playerId, 0L, 1, team);
                 ReservationJdbc.save(connection, row, previous != null, now);
                 connection.commit();
                 return row;

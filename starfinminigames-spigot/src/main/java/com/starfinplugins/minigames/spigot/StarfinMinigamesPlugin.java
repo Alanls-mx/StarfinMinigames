@@ -2,7 +2,13 @@ package com.starfinplugins.minigames.spigot;
 
 import com.starfinplugins.minigames.api.MinigameRegistry;
 import org.bukkit.command.PluginCommand;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
 import org.bukkit.event.HandlerList;
+import org.bukkit.event.Listener;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.entity.FoodLevelChangeEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -18,6 +24,10 @@ public final class StarfinMinigamesPlugin extends JavaPlugin {
             registry = new SpigotMinigameRegistry(serverId);
             getServer().getServicesManager().register(MinigameRegistry.class, registry, this, ServicePriority.Normal);
             getServer().getPluginManager().registerEvents(registry, this);
+            if (getConfig().getBoolean("lobby.prevent-hunger", false)) {
+                getServer().getPluginManager().registerEvents(new LobbyHungerListener(), this);
+                for (Player player : getServer().getOnlinePlayers()) player.setFoodLevel(20);
+            }
             PluginCommand command = getCommand("sminigames");
             if (command == null) throw new IllegalStateException("Comando sminigames ausente");
             MinigameCommand executor = new MinigameCommand(this, registry);
@@ -38,4 +48,16 @@ public final class StarfinMinigamesPlugin extends JavaPlugin {
     }
 
     public MinigameRegistry getRegistry() { return registry; }
+
+    private static final class LobbyHungerListener implements Listener {
+        @EventHandler public void onJoin(PlayerJoinEvent event) {
+            event.getPlayer().setFoodLevel(20);
+        }
+
+        @EventHandler(priority = EventPriority.HIGHEST)
+        public void onFoodLevelChange(FoodLevelChangeEvent event) {
+            event.setCancelled(true);
+            if (event.getEntity() instanceof Player) ((Player) event.getEntity()).setFoodLevel(20);
+        }
+    }
 }
