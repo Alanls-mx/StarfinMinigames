@@ -96,12 +96,19 @@ final class PartyJoinBridge {
         Map<UUID,ProxiedPlayer> result = new LinkedHashMap<UUID,ProxiedPlayer>();
         for (UUID id : ids) {
             ProxiedPlayer player = plugin.proxy().getPlayer(id);
-            if (player == null || player.getServer() == null
-                    || !plugin.settings().lobbyServer.equals(player.getServer().getInfo().getName()))
+            if (player == null || player.getServer() == null)
                 return null;
             result.put(id,player);
         }
         return result;
+    }
+
+    private static boolean allowedSource(StarfinMinigamesBungee plugin,
+            ProxiedPlayer player, ServerInfo destination) {
+        if (player == null || player.getServer() == null) return false;
+        String current = player.getServer().getInfo().getName();
+        return plugin.settings().lobbyServer.equals(current)
+            || destination.getName().equals(current);
     }
 
     private static void reserveAndConnect(StarfinMinigamesBungee plugin, PartyService social,
@@ -133,6 +140,8 @@ final class PartyJoinBridge {
                     || checked.value.revision != plan.revision
                     || !checked.value.onlineMembers.equals(ids)
                     || localMembers(plugin,ids) == null
+                    || members.values().stream().anyMatch(player ->
+                        !allowedSource(plugin, player, destination))
                     || plugin.proxy().getPlayer(leader.getUniqueId()) != leader) {
                 for (ReservationSnapshot row : rows) plugin.fail(row,false);
                 plugin.releaseGroup(ids);
@@ -159,13 +168,27 @@ final class PartyJoinBridge {
         ReservationSnapshot row = rows.get(index);
         UUID id = row.getPlayerId();
         ProxiedPlayer player = members.get(id);
-        if (plugin.proxy().getPlayer(id) != player || player.getServer() == null
-                || !plugin.settings().lobbyServer.equals(player.getServer().getInfo().getName())) {
+        if (plugin.proxy().getPlayer(id) != player
+                || !allowedSource(plugin, player, destination)) {
             cancelUnattempted(plugin,rows,index);
             notifyPartial(plugin,leader);
             return;
         }
         plugin.trackTransfer(id,row);
+        if (destination.equals(player.getServer().getInfo())) {
+            if (!plugin.deliverSameServer(player, destination, row)) {
+                plugin.clearTransfer(id,row);
+                plugin.submitIo(() -> plugin.fail(row,false));
+                cancelUnattempted(plugin,rows,index + 1);
+                notifyPartial(plugin,leader);
+                return;
+            }
+            plugin.releaseFlight(id);
+            plugin.sendKey(player,"connecting","&aEntrando na arena {arena}...",
+                "arena",row.getArenaId());
+            connectSequentially(plugin,leader,destination,rows,members,index + 1);
+            return;
+        }
         player.connect(destination,(connected,error) -> {
             if (error != null || !Boolean.TRUE.equals(connected)) {
                 plugin.clearTransfer(id,row);
@@ -202,7 +225,29 @@ final class PartyJoinBridge {
         for (ReservationSnapshot row : rows) {
             UUID id = row.getPlayerId();
             ProxiedPlayer player = members.get(id);
+            if (plugin.proxy().getPlayer(id) != player
+                    || !allowedSource(plugin, player, destination)) {
+                failed.set(true);
+                plugin.releaseFlight(id);
+                plugin.submitIo(() -> plugin.fail(row, false));
+                if (remaining.decrementAndGet() == 0) notifyPartial(plugin, leader);
+                continue;
+            }
             plugin.trackTransfer(id,row);
+            if (destination.equals(player.getServer().getInfo())) {
+                if (plugin.deliverSameServer(player, destination, row)) {
+                    plugin.releaseFlight(id);
+                    plugin.sendKey(player,"connecting","&aEntrando na arena {arena}...",
+                        "arena",row.getArenaId());
+                } else {
+                    failed.set(true);
+                    plugin.clearTransfer(id,row);
+                    plugin.submitIo(() -> plugin.fail(row,false));
+                }
+                if (remaining.decrementAndGet() == 0 && failed.get())
+                    notifyPartial(plugin,leader);
+                continue;
+            }
             player.connect(destination,(connected,error) -> {
                 if (error != null || !Boolean.TRUE.equals(connected)) {
                     failed.set(true);

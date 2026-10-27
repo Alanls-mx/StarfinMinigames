@@ -1,5 +1,7 @@
 package com.starfinplugins.minigames.bungee;
 
+import com.google.common.io.ByteArrayDataOutput;
+import com.google.common.io.ByteStreams;
 import com.starfinplugins.minigames.api.ReservationSnapshot;
 import java.io.IOException;
 import java.sql.SQLException;
@@ -23,6 +25,7 @@ import net.md_5.bungee.api.scheduler.ScheduledTask;
 
 /** Bungee entry point; JDBC is confined to a bounded worker pool. */
 public final class StarfinMinigamesBungee extends Plugin implements Listener {
+    private static final String SAME_SERVER_CHANNEL = "SMJoin";
     private volatile BungeeSettings settings;
     private volatile BungeeDatabase database;
     private ThreadPoolExecutor io;
@@ -44,6 +47,7 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
             getProxy().getPluginManager().registerCommand(this, new NetworkCommand(this));
             getProxy().getPluginManager().registerCommand(this, new JoinCommand(this));
             getProxy().getPluginManager().registerListener(this, this);
+            getProxy().registerChannel(SAME_SERVER_CHANNEL);
             if (settings.networkEnabled) {
                 submitIo(() -> {
                     try {
@@ -77,6 +81,7 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
         if (cleanup != null) cleanup.cancel();
         getProxy().getPluginManager().unregisterCommands(this);
         getProxy().getPluginManager().unregisterListeners(this);
+        getProxy().unregisterChannel(SAME_SERVER_CHANNEL);
         if (io != null) {
             io.shutdown();
             try { if (!io.awaitTermination(5, TimeUnit.SECONDS)) io.shutdownNow(); }
@@ -158,13 +163,24 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
             }
             String name = active.serverNames.get(reservation.getServerId());
             ServerInfo destination = name == null ? null : getProxy().getServerInfo(name);
-            if (destination == null || getProxy().getPlayer(playerId) != player
-                    || (player.getServer() != null && destination.equals(player.getServer().getInfo()))) {
+            if (destination == null || getProxy().getPlayer(playerId) != player) {
                 inFlight.remove(playerId);
                 submitIo(() -> fail(reservation, false));
                 if (getProxy().getPlayer(playerId) == player)
                     sendKey(player, "destination-unavailable",
-                        "&cDestino indisponivel ou voce ja esta nesse servidor.");
+                        "&cDestino indisponivel neste momento.");
+                return;
+            }
+            if (player.getServer() != null && destination.equals(player.getServer().getInfo())) {
+                inFlight.remove(playerId);
+                if (deliverSameServer(player, destination, reservation))
+                    sendKey(player, "connecting", "&aEntrando na arena {arena}...",
+                        "arena", reservation.getArenaId());
+                else {
+                    submitIo(() -> fail(reservation, false));
+                    sendKey(player, "connection-failed",
+                        "&cNao foi possivel entregar a entrada para a arena.");
+                }
                 return;
             }
             transfers.put(playerId, reservation);
@@ -183,6 +199,16 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
             inFlight.remove(playerId);
             sendKey(player, "proxy-busy", "&cO proxy esta ocupado. Tente novamente em instantes.");
         }
+    }
+
+    boolean deliverSameServer(ProxiedPlayer player, ServerInfo destination,
+                              ReservationSnapshot reservation) {
+        if (player == null || destination == null || reservation == null
+                || player.getServer() == null
+                || !destination.equals(player.getServer().getInfo())) return false;
+        ByteArrayDataOutput output = ByteStreams.newDataOutput();
+        output.writeUTF(reservation.getPlayerId().toString());
+        return destination.sendData(SAME_SERVER_CHANNEL, output.toByteArray(), false);
     }
 
     void fail(ReservationSnapshot reservation, boolean pendingOnly) {
