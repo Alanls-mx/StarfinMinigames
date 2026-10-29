@@ -25,7 +25,7 @@ independentemente. Nenhum transporte Bungee é tratado como atômico. Reservas e
 deixam de ocupar vagas, inclusive após reinício do destino. Configure o mesmo
 prazo no BedWars. A reconexão de partida existente não cria uma nova reserva.
 
-API compartilhada e roteamento BungeeCord para Java 8 e Spigot/PaperSpigot 1.8.8. A entrada em partida de uma Party integra opcionalmente o StarfinSocial no proxy; amizades, clãs, ranqueadas e campeonatos permanecem fora deste módulo.
+API compartilhada e roteamento BungeeCord para Java 8 e Spigot/PaperSpigot 1.8.8. A entrada em partida de uma Party integra o StarfinSocial no proxy. A Fase 6.2 adiciona filas ranqueadas persistentes; veja [RANKED_PHASE_6_2.md](RANKED_PHASE_6_2.md). Amizades, clãs e campeonatos permanecem fora deste módulo.
 
 ## Módulos e responsabilidades
 

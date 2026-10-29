@@ -30,6 +30,9 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
     private volatile BungeeDatabase database;
     private ThreadPoolExecutor io;
     private ScheduledTask cleanup;
+    private ScheduledTask rankedTick;
+    private final UUID proxyId = UUID.randomUUID();
+    private RankedQueueService rankedQueue;
     private final Map<UUID, ReservationSnapshot> transfers = new ConcurrentHashMap<UUID, ReservationSnapshot>();
     private final java.util.Set<UUID> inFlight = java.util.Collections.newSetFromMap(
         new ConcurrentHashMap<UUID, Boolean>());
@@ -46,6 +49,8 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
                 }, new ThreadPoolExecutor.AbortPolicy());
             getProxy().getPluginManager().registerCommand(this, new NetworkCommand(this));
             getProxy().getPluginManager().registerCommand(this, new JoinCommand(this));
+            rankedQueue = new RankedQueueService(this, proxyId);
+            getProxy().getPluginManager().registerCommand(this, new RankedCommand(rankedQueue));
             getProxy().getPluginManager().registerListener(this, this);
             getProxy().registerChannel(SAME_SERVER_CHANNEL);
             if (settings.networkEnabled) {
@@ -67,6 +72,8 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
                     long now = System.currentTimeMillis();
                     transfers.entrySet().removeIf(entry -> entry.getValue().getExpiresAtMillis() + 90000L < now);
                 }), 10, 10, TimeUnit.SECONDS);
+                rankedTick = getProxy().getScheduler().schedule(this,
+                    () -> rankedQueue.tick(), 2, settings.ranked.heartbeatSeconds, TimeUnit.SECONDS);
             } else getLogger().info("Catalogo desativado; comandos administrativos disponiveis.");
         } catch (Exception error) {
             getLogger().severe("StarfinMinigames-Bungee nao iniciou: " + error.getMessage());
@@ -79,6 +86,7 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
     @Override public void onDisable() {
         stopping = true;
         if (cleanup != null) cleanup.cancel();
+        if (rankedTick != null) rankedTick.cancel();
         getProxy().getPluginManager().unregisterCommands(this);
         getProxy().getPluginManager().unregisterListeners(this);
         getProxy().unregisterChannel(SAME_SERVER_CHANNEL);
@@ -94,6 +102,7 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
     }
 
     BungeeSettings settings() { return settings; }
+    UUID proxyId() { return proxyId; }
     BungeeDatabase database() { return database; }
     ProxyServer proxy() { return getProxy(); }
 
@@ -258,6 +267,7 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
             if (old.networkEnabled != next.networkEnabled || old.mysqlEnabled != next.mysqlEnabled
                     || !old.networkId.equals(next.networkId) || !old.lobbyServer.equals(next.lobbyServer)
                     || !old.serverNames.equals(next.serverNames) || !old.mysqlHost.equals(next.mysqlHost)
+                    || old.ranked.heartbeatSeconds != next.ranked.heartbeatSeconds
                     || old.mysqlPort != next.mysqlPort || !old.mysqlDatabase.equals(next.mysqlDatabase)
                     || !old.mysqlUser.equals(next.mysqlUser) || !old.mysqlPassword.equals(next.mysqlPassword)
                     || !old.sslMode.equals(next.sslMode))

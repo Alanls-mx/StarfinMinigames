@@ -87,6 +87,11 @@ final class TeamSlots {
         return max;
     }
 
+    Map<String, Integer> emptyCapacities() {
+        for (int used : occupied.values()) if (used != 0) return java.util.Collections.emptyMap();
+        return java.util.Collections.unmodifiableMap(new LinkedHashMap<String, Integer>(capacities));
+    }
+
     String assign(int members) {
         String selected = null;
         for (Map.Entry<String,Integer> team : capacities.entrySet()) {

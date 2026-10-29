@@ -22,8 +22,10 @@ final class BungeeSettings {
     final int serverTimeoutSeconds, reservationTimeoutSeconds, partyArrivalGraceSeconds, mysqlPort;
     final Map<String, String> serverNames;
     final Map<String, String> messages;
+    final RankedMatchmakingSettings ranked;
 
     BungeeSettings(Configuration yaml, Predicate<String> registeredServer) {
+        ranked = new RankedMatchmakingSettings(yaml);
         networkEnabled = yaml.getBoolean("network.enabled", false);
         mysqlEnabled = yaml.getBoolean("mysql.enabled", false);
         matchmakingEnabled = yaml.getBoolean("matchmaking.enabled", true);

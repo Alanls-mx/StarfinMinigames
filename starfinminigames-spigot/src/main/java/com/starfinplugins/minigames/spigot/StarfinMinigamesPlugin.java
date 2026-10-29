@@ -56,6 +56,24 @@ public final class StarfinMinigamesPlugin extends JavaPlugin {
 
     public MinigameRegistry getRegistry() { return registry; }
 
+    /** BedWars calls this only after verifying the complete MySQL allocation. */
+    public void authorizeRanked(Object match) {
+        if (!getServer().isPrimaryThread() || match == null)
+            throw new IllegalStateException("Admissao competitiva exige a thread principal");
+        try {
+            Class<?> matchType = Class.forName("com.starfinplugins.bedwars.domain.match.GameMatch");
+            Class<?> apiType = Class.forName("com.starfinplugins.bedwars.ranked.RankedApi");
+            org.bukkit.plugin.RegisteredServiceProvider<?> registered =
+                getServer().getServicesManager().getRegistration(apiType);
+            if (registered == null || !matchType.isInstance(match))
+                throw new IllegalStateException("Contrato competitivo ausente");
+            apiType.getMethod("authorize", matchType, org.bukkit.plugin.Plugin.class)
+                .invoke(registered.getProvider(), match, this);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Admissao competitiva recusada", error);
+        }
+    }
+
     private static final class LobbyRulesListener implements Listener {
         private final StarfinMinigamesPlugin plugin;
         private final boolean preventHunger;

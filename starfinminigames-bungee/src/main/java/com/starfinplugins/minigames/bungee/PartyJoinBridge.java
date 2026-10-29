@@ -78,7 +78,7 @@ final class PartyJoinBridge {
         });
     }
 
-    private static PartyService service(StarfinMinigamesBungee plugin) {
+    static PartyService service(StarfinMinigamesBungee plugin) {
         Plugin social = plugin.proxy().getPluginManager().getPlugin("StarfinSocial");
         if (social == null) return null;
         try {

@@ -24,6 +24,7 @@ final class BungeeDatabase implements AutoCloseable {
     private volatile BungeeSettings settings;
     private final NetworkCatalogAdapter bedwars = new BedWarsCatalogAdapter();
     private final HikariDataSource pool;
+    Connection connection() throws SQLException { return pool.getConnection(); }
 
     BungeeDatabase(BungeeSettings settings) throws SQLException {
         this.settings = settings;
@@ -43,6 +44,7 @@ final class BungeeDatabase implements AutoCloseable {
         HikariDataSource created = new HikariDataSource(config);
         try (Connection connection = created.getConnection()) {
             ReservationJdbc.ensureTable(connection);
+            RankedQueueStore.ensureSchema(connection);
             // Fail fast on an incompatible or missing BedWars catalog.
             bedwars.read(connection, settings, System.currentTimeMillis());
         } catch (SQLException | RuntimeException error) {
@@ -64,6 +66,7 @@ final class BungeeDatabase implements AutoCloseable {
         List<NetworkArenaSnapshot> options = NetworkSelector.options(directory, settings.serverNames,
             gameId, mode, settings.preferExisting, settings.serverTimeoutSeconds * 1000L);
         for (NetworkArenaSnapshot option : options) {
+            if (settings.ranked.arenaGroups.contains(option.getGroup())) continue;
             ReservationSnapshot row = tryReserve(playerId, option);
             if (row != null) return row;
         }
@@ -88,6 +91,7 @@ final class BungeeDatabase implements AutoCloseable {
         List<NetworkArenaSnapshot> options = NetworkSelector.options(directory, settings.serverNames,
             gameId, mode, settings.preferExisting, settings.serverTimeoutSeconds * 1000L);
         for (NetworkArenaSnapshot option : options) {
+            if (settings.ranked.arenaGroups.contains(option.getGroup())) continue;
             List<ReservationSnapshot> rows = tryReserveGroup(ordered, option,
                 partyId, revision, leaderId);
             if (!rows.isEmpty()) return rows;

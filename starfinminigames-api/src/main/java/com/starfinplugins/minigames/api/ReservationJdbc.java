@@ -23,7 +23,8 @@ public final class ReservationJdbc {
                 + "created_at BIGINT NOT NULL,expires_at BIGINT NOT NULL,updated_at BIGINT NOT NULL,"
                 + "group_id CHAR(36) NULL,party_id CHAR(36) NULL,leader_uuid CHAR(36) NULL,"
                 + "party_revision BIGINT NOT NULL DEFAULT 0,group_size INT NOT NULL DEFAULT 1,"
-                + "team_id VARCHAR(32) NULL,"
+                + "team_id VARCHAR(32) NULL,ranked_allocation_id CHAR(36) NULL,"
+                + "competitive_context VARCHAR(32) NULL,"
                 + "INDEX idx_sm_reservation_arena (server_id,server_instance,arena_id,state,expires_at),"
                 + "INDEX idx_sm_reservation_expiry (state,expires_at)"
                 + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -38,8 +39,11 @@ public final class ReservationJdbc {
         addColumn(connection, "party_revision", "BIGINT NOT NULL DEFAULT 0");
         addColumn(connection, "group_size", "INT NOT NULL DEFAULT 1");
         addColumn(connection, "team_id", "VARCHAR(32) NULL");
+        addColumn(connection, "ranked_allocation_id", "CHAR(36) NULL");
+        addColumn(connection, "competitive_context", "VARCHAR(32) NULL");
         try (Statement statement = connection.createStatement()) {
             statement.execute("INSERT IGNORE INTO sm_schema_migrations (version,applied_at) VALUES ('4.4.1'," + System.currentTimeMillis() + ")");
+            statement.execute("INSERT IGNORE INTO sm_schema_migrations (version,applied_at) VALUES ('6.2'," + System.currentTimeMillis() + ")");
         }
     }
 
@@ -61,7 +65,8 @@ public final class ReservationJdbc {
             throws SQLException {
         String query = "SELECT reservation_id,player_uuid,minigame_id,mode,server_id,server_instance,"
             + "arena_id,state,created_at,expires_at,group_id,party_id,leader_uuid,"
-            + "party_revision,group_size,team_id FROM " + TABLE + " WHERE player_uuid=?"
+            + "party_revision,group_size,team_id,ranked_allocation_id,competitive_context"
+            + " FROM " + TABLE + " WHERE player_uuid=?"
             + (lock ? " FOR UPDATE" : "");
         try (PreparedStatement statement = connection.prepareStatement(query)) {
             statement.setString(1, playerId.toString());
@@ -77,12 +82,13 @@ public final class ReservationJdbc {
         String query = existing
             ? "UPDATE " + TABLE + " SET reservation_id=?,minigame_id=?,mode=?,server_id=?,"
                 + "server_instance=?,arena_id=?,state='PENDING',created_at=?,expires_at=?,updated_at=?,"
-                + "group_id=?,party_id=?,leader_uuid=?,party_revision=?,group_size=?,team_id=?"
+                + "group_id=?,party_id=?,leader_uuid=?,party_revision=?,group_size=?,team_id=?,"
+                + "ranked_allocation_id=?,competitive_context=?"
                 + " WHERE player_uuid=?"
             : "INSERT INTO " + TABLE + " (reservation_id,minigame_id,mode,server_id,server_instance,"
                 + "arena_id,state,created_at,expires_at,updated_at,group_id,party_id,leader_uuid,"
-                + "party_revision,group_size,team_id,player_uuid)"
-                + " VALUES (?,?,?,?,?,?,'PENDING',?,?,?,?,?,?,?,?,?,?)";
+                + "party_revision,group_size,team_id,ranked_allocation_id,competitive_context,player_uuid)"
+                + " VALUES (?,?,?,?,?,?,'PENDING',?,?,?,?,?,?,?,?,?,?,?,?)";
         try (PreparedStatement statement = connection.prepareStatement(query)) {
             statement.setString(1, reservation.getId().toString());
             statement.setString(2, reservation.getMinigameId());
@@ -99,7 +105,9 @@ public final class ReservationJdbc {
             statement.setLong(13, reservation.getPartyRevision());
             statement.setInt(14, reservation.getGroupSize());
             statement.setString(15, reservation.getTeamId());
-            statement.setString(16, reservation.getPlayerId().toString());
+            statement.setString(16, uuid(reservation.getRankedAllocationId()));
+            statement.setString(17, reservation.getCompetitiveContext());
+            statement.setString(18, reservation.getPlayerId().toString());
             statement.executeUpdate();
         }
     }
@@ -123,7 +131,8 @@ public final class ReservationJdbc {
         return new ReservationSnapshot(row.getId(), playerId, row.getMinigameId(), row.getMode(),
             serverId, instanceId, row.getArenaId(), ReservationState.CLAIMED,
             row.getCreatedAtMillis(), expires, row.getGroupId(), row.getPartyId(),
-            row.getLeaderId(), row.getPartyRevision(), row.getGroupSize(), row.getTeamId());
+            row.getLeaderId(), row.getPartyRevision(), row.getGroupSize(), row.getTeamId(),
+            row.getRankedAllocationId(), row.getCompetitiveContext());
     }
 
     public static boolean finish(Connection connection, UUID id, UUID playerId,
@@ -161,7 +170,8 @@ public final class ReservationJdbc {
             ReservationState.valueOf(row.getString("state")), row.getLong("created_at"),
             row.getLong("expires_at"), nullableUuid(row.getString("group_id")),
             nullableUuid(row.getString("party_id")), nullableUuid(row.getString("leader_uuid")),
-            row.getLong("party_revision"), row.getInt("group_size"), row.getString("team_id"));
+            row.getLong("party_revision"), row.getInt("group_size"), row.getString("team_id"),
+            nullableUuid(row.getString("ranked_allocation_id")), row.getString("competitive_context"));
     }
     private static String uuid(UUID id) { return id == null ? null : id.toString(); }
     private static UUID nullableUuid(String value) { return value == null ? null : UUID.fromString(value); }

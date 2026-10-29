@@ -22,6 +22,34 @@ party-matchmaking:
   allow-solo-party: true
   arrival-grace-seconds: 20
   partial-transfer-policy: CANCEL_PENDING
+ranked-matchmaking:
+  enabled: false
+  auth:
+    require-starfin-login: true
+  modes:
+    solo: true
+    duo: true
+    trio: true
+    squad: true
+    custom: false
+  arenas:
+    allowed-groups: [ranked]
+  search:
+    initial-rating-range: 250
+    expansion-interval-seconds: 30
+    expansion-amount: 75
+    maximum-rating-range: 600
+  party:
+    maximum-rating-difference: 400
+    allow-solo-party: false
+  teams:
+    balance-enabled: true
+    maximum-average-rating-difference: 250
+  queue:
+    heartbeat-seconds: 5
+    stale-entry-seconds: 30
+    transfer-seconds: 60
+    allocation-seconds: 120
 messages:
   prefix: '&b&lStarfin &8» '
   matchmaking-unavailable: '&cMatchmaking indisponivel neste momento.'
@@ -42,3 +70,9 @@ messages:
   party-oversized: '&cSua Party possui {size} jogadores, mas cada equipe suporta no maximo {capacity}.'
   party-no-team: '&cNao existe uma equipe com vagas suficientes para sua Party.'
   party-solo-disabled: '&eParties nao podem entrar juntas no modo Solo.'
+  ranked-unavailable: '&cAs ranqueadas estao temporariamente indisponiveis.'
+  ranked-joined: '&aVoce entrou na fila ranqueada {mode}.'
+  ranked-found: '&aPartida encontrada! Preparando sua equipe...'
+  ranked-left: '&eVoce saiu da fila ranqueada.'
+  ranked-party-changed: '&eSua Party mudou; a busca ranqueada foi cancelada.'
+  ranked-suspended: '&cEntrada ranqueada suspensa por mais {minutes} minuto(s).'
