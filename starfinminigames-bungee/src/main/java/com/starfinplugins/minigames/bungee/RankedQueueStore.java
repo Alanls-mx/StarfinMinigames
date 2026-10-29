@@ -75,17 +75,28 @@ final class RankedQueueStore {
     static final class Policy {
         final String context;
         final int initial;
-        Policy(String context, int initial) { this.context = context; this.initial = initial; }
+        final long version;
+        Policy(String context, int initial, long version) {
+            this.context = context; this.initial = initial; this.version = version;
+        }
     }
     Policy policy(NetworkArenaSnapshot arena, long now) throws SQLException {
         try (Connection c = db.connection(); PreparedStatement query = c.prepareStatement(
-                "SELECT context,initial_rating FROM sbw_ranked_policy WHERE server_id=?"
-                + " AND instance_id=? AND enabled=1 AND updated_at>?")) {
+                "SELECT p.context,p.initial_rating,p.season_version FROM sbw_ranked_policy p"
+                + " JOIN sbw_ranked_season_control control ON control.control_id=1"
+                + " LEFT JOIN sbw_ranked_seasons season ON season.season_id=control.active_id"
+                + " WHERE p.server_id=? AND p.instance_id=? AND p.enabled=1 AND p.updated_at>?"
+                + " AND ((control.active_id IS NULL AND control.policy_version=0"
+                + " AND p.season_version=0)"
+                + " OR (season.season_id=p.context AND p.season_version=control.policy_version"
+                + " AND season.state='ACTIVE' AND season.starts_at<=? AND season.ends_at>?"
+                + " AND FIND_IN_SET(?,season.modes)>0))")) {
             query.setString(1, arena.getServerId());
             query.setString(2, arena.getInstanceId().toString());
             query.setLong(3, now - settings.serverTimeoutSeconds * 1000L);
+            query.setLong(4, now); query.setLong(5, now); query.setString(6, arena.getMode());
             try (ResultSet row = query.executeQuery()) {
-                return row.next() ? new Policy(row.getString(1), row.getInt(2)) : null;
+                return row.next() ? new Policy(row.getString(1), row.getInt(2), row.getLong(3)) : null;
             }
         }
     }
@@ -99,7 +110,7 @@ final class RankedQueueStore {
             Policy policy = policy(arena, System.currentTimeMillis());
             if (policy == null) continue;
             if (selected != null && (!selected.context.equals(policy.context)
-                    || selected.initial != policy.initial))
+                    || selected.initial != policy.initial || selected.version != policy.version))
                 throw new SQLException("Politicas competitivas divergentes entre servidores");
             selected = policy;
         }
@@ -107,14 +118,39 @@ final class RankedQueueStore {
     }
     Map<UUID, Integer> ratings(List<UUID> members, String mode, Policy policy) throws SQLException {
         Map<UUID, Integer> result = new LinkedHashMap<UUID, Integer>();
+        String source = null;
+        double factor = 0D;
+        if (policy.version > 0) try (Connection c = db.connection(); PreparedStatement query = c.prepareStatement(
+                "SELECT reset_type,reset_source,reset_factor FROM sbw_ranked_seasons WHERE season_id=?")) {
+            query.setString(1, policy.context);
+            try (ResultSet row = query.executeQuery()) {
+                if (!row.next()) throw new SQLException("Temporada desapareceu");
+                if ("SOFT_RESET".equals(row.getString(1))) {
+                    source = row.getString(2); factor = row.getDouble(3);
+                }
+            }
+        }
         try (Connection c = db.connection(); PreparedStatement query = c.prepareStatement(
-                "SELECT rating FROM sbw_ranked_profiles WHERE player_uuid=? AND mode=? AND context=?")) {
+                "SELECT rating FROM sbw_ranked_profiles WHERE player_uuid=? AND mode=? AND context=?");
+             PreparedStatement previous = c.prepareStatement(
+                "SELECT rating FROM sbw_ranked_season_snapshots"
+                + " WHERE season_id=? AND mode=? AND player_uuid=?")) {
             query.setQueryTimeout(5);
             for (UUID id : members) {
                 query.setString(1, id.toString()); query.setString(2, mode);
                 query.setString(3, policy.context);
                 try (ResultSet row = query.executeQuery()) {
-                    int rating = row.next() ? row.getInt(1) : policy.initial;
+                    int rating;
+                    if (row.next()) rating = row.getInt(1);
+                    else if (source == null) rating = policy.initial;
+                    else {
+                        previous.setString(1, source); previous.setString(2, mode);
+                        previous.setString(3, id.toString());
+                        try (ResultSet old = previous.executeQuery()) {
+                            rating = old.next() ? Math.max(0, (int) Math.round(policy.initial
+                                + (old.getInt(1) - policy.initial) * factor)) : policy.initial;
+                        }
+                    }
                     if (rating < 0 || rating > 1000000) throw new SQLException("Rating competitivo invalido");
                     result.put(id, rating);
                 }
@@ -183,6 +219,8 @@ final class RankedQueueStore {
         try (Connection c = db.connection()) {
             c.setAutoCommit(false);
             try {
+                if (!currentPolicy(c, policy, mode, now)) { c.rollback();
+                    throw new IllegalStateException("Politica da temporada mudou"); }
                 for (UUID id : members) {
                     try (PreparedStatement suspension = c.prepareStatement(
                             "SELECT until_at FROM sbw_ranked_suspensions"
@@ -264,6 +302,7 @@ final class RankedQueueStore {
         }
     }
     void heartbeatOwned(Set<UUID> localPlayers) throws SQLException {
+        cancelClosedQueues();
         List<UUID> owned = new ArrayList<UUID>();
         try (Connection c = db.connection(); PreparedStatement query = c.prepareStatement(
                 "SELECT entry_id FROM sm_ranked_queue_entries WHERE owner_proxy=? AND state='WAITING'")) {
@@ -369,6 +408,7 @@ final class RankedQueueStore {
             c.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
             c.setAutoCommit(false);
             try {
+                if (!currentPolicy(c, policy, mode, now)) { c.rollback(); return null; }
                 try (PreparedStatement create = c.prepareStatement(
                         "INSERT IGNORE INTO sm_ranked_mode_mutex(mode) VALUES(?)")) {
                     create.setString(1, mode); create.executeUpdate();
@@ -462,6 +502,70 @@ final class RankedQueueStore {
             finally { c.setAutoCommit(true); }
         }
     }
+
+    /** Serializes enrollment/allocation against backend season transitions. */
+    private static boolean currentPolicy(Connection c, Policy policy, String mode, long now)
+            throws SQLException {
+        try (PreparedStatement query = c.prepareStatement(
+                "SELECT control.active_id,control.policy_version,season.state,season.starts_at,"
+                + "season.ends_at,season.modes FROM sbw_ranked_season_control control"
+                + " LEFT JOIN sbw_ranked_seasons season ON season.season_id=control.active_id"
+                + " WHERE control.control_id=1 FOR UPDATE")) {
+            try (ResultSet row = query.executeQuery()) {
+                if (!row.next()) return false;
+                String active = row.getString(1);
+                if (active == null) return policy.version == 0 && row.getLong(2) == 0;
+                return active.equals(policy.context) && row.getLong(2) == policy.version
+                    && "ACTIVE".equals(row.getString(3)) && row.getLong(4) <= now
+                    && row.getLong(5) > now && java.util.Arrays.asList(row.getString(6).split(","))
+                        .contains(mode);
+            }
+        }
+    }
+
+    private void cancelClosedQueues() throws SQLException {
+        List<UUID> cancelledAllocations = new ArrayList<UUID>();
+        try (Connection c = db.connection()) {
+            c.setAutoCommit(false);
+            try {
+                String active;
+                String state;
+                long version;
+                try (PreparedStatement control = c.prepareStatement(
+                        "SELECT control.active_id,season.state,control.policy_version"
+                        + " FROM sbw_ranked_season_control control"
+                        + " LEFT JOIN sbw_ranked_seasons season ON season.season_id=control.active_id"
+                        + " WHERE control.control_id=1"); ResultSet row = control.executeQuery()) {
+                    if (!row.next()) { c.rollback(); return; }
+                    active = row.getString(1); state = row.getString(2);
+                    version = row.getLong(3);
+                }
+                if (active == null && version == 0) { c.commit(); return; }
+                if (active == null) state = "FINISHED";
+                try (PreparedStatement update = c.prepareStatement(
+                        "UPDATE sm_ranked_queue_entries SET state='CANCELLED'"
+                        + " WHERE state='WAITING' AND (context<>? OR ?<>'ACTIVE')")) {
+                    update.setString(1, active); update.setString(2, state); update.executeUpdate();
+                }
+                try (PreparedStatement release = c.prepareStatement(
+                        "DELETE m FROM sm_ranked_queue_members m JOIN sm_ranked_queue_entries e"
+                        + " ON e.entry_id=m.entry_id WHERE e.state='CANCELLED'")) {
+                    release.executeUpdate();
+                }
+                try (PreparedStatement allocations = c.prepareStatement(
+                        "SELECT allocation_id FROM sm_ranked_allocations WHERE state IN"
+                        + " ('RESERVED','TRANSFERRING') AND (context<>? OR ?<>'ACTIVE')")) {
+                    allocations.setString(1, active); allocations.setString(2, state);
+                    try (ResultSet row = allocations.executeQuery()) {
+                        while (row.next()) cancelledAllocations.add(UUID.fromString(row.getString(1)));
+                    }
+                }
+                c.commit();
+            } catch (SQLException | RuntimeException error) { c.rollback(); throw error; }
+            finally { c.setAutoCommit(true); }
+        }
+        for (UUID id : cancelledAllocations) failAllocation(id);
+    }
     private List<RankedTeamMatcher.Entry> waiting(Connection c, String mode, String context, long now)
             throws SQLException {
         List<RankedTeamMatcher.Entry> result = new ArrayList<RankedTeamMatcher.Entry>();
@@ -540,6 +644,25 @@ final class RankedQueueStore {
         try (Connection c = db.connection()) {
             c.setAutoCommit(false);
             try {
+                Policy policy;
+                String mode;
+                try (PreparedStatement check = c.prepareStatement(
+                        "SELECT a.context,a.mode,p.initial_rating,p.season_version,p.enabled"
+                        + " FROM sm_ranked_allocations a JOIN sbw_ranked_policy p"
+                        + " ON p.server_id=a.server_id AND p.instance_id=a.server_instance"
+                        + " WHERE a.allocation_id=?")) {
+                    check.setString(1, entry.allocationId.toString());
+                    try (ResultSet row = check.executeQuery()) {
+                        if (!row.next() || !row.getBoolean(5)) {
+                            c.rollback(); return Collections.emptyList();
+                        }
+                        policy = new Policy(row.getString(1), row.getInt(3), row.getLong(4));
+                        mode = row.getString(2);
+                    }
+                }
+                if (!currentPolicy(c, policy, mode, System.currentTimeMillis())) {
+                    c.rollback(); return Collections.emptyList();
+                }
                 try (PreparedStatement move = c.prepareStatement(
                         "UPDATE sm_ranked_queue_entries SET state='TRANSFERRING'"
                         + " WHERE entry_id=? AND owner_proxy=? AND state='RESERVED' AND expires_at>?")) {

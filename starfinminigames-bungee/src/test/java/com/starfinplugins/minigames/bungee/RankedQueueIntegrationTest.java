@@ -50,7 +50,13 @@ public class RankedQueueIntegrationTest {
                 + "state VARCHAR(16),started_at BIGINT,ended_at BIGINT,updated_at BIGINT)");
             sql.execute("CREATE TABLE IF NOT EXISTS sbw_ranked_policy (server_id VARCHAR(32) PRIMARY KEY,"
                 + "instance_id CHAR(36),enabled TINYINT,context VARCHAR(32),"
-                + "initial_rating INT,updated_at BIGINT)");
+                + "initial_rating INT,updated_at BIGINT,season_version BIGINT DEFAULT 0)");
+            sql.execute("CREATE TABLE IF NOT EXISTS sbw_ranked_season_control"
+                + " (control_id TINYINT PRIMARY KEY,active_id VARCHAR(32),policy_version BIGINT)");
+            sql.execute("INSERT IGNORE INTO sbw_ranked_season_control VALUES(1,NULL,0)");
+            sql.execute("CREATE TABLE IF NOT EXISTS sbw_ranked_seasons"
+                + " (season_id VARCHAR(32) PRIMARY KEY,state VARCHAR(16),starts_at BIGINT,"
+                + "ends_at BIGINT,modes VARCHAR(96))");
             sql.execute("CREATE TABLE IF NOT EXISTS sbw_ranked_profiles (player_uuid CHAR(36),"
                 + "mode VARCHAR(16),context VARCHAR(32),rating INT,PRIMARY KEY(player_uuid,mode,context))");
             sql.execute("CREATE TABLE IF NOT EXISTS sbw_ranked_suspensions (player_uuid CHAR(36),"
@@ -74,7 +80,8 @@ public class RankedQueueIntegrationTest {
                 insert.setLong(14, 0); insert.executeUpdate();
             }
             try (PreparedStatement insert = c.prepareStatement(
-                    "INSERT INTO sbw_ranked_policy VALUES(?,?,?,?,?,?)")) {
+                    "INSERT INTO sbw_ranked_policy(server_id,instance_id,enabled,context,"
+                    + "initial_rating,updated_at,season_version) VALUES(?,?,?,?,?,?,0)")) {
                 insert.setString(1, server); insert.setString(2, instance.toString());
                 insert.setBoolean(3, true); insert.setString(4, "preseason-1");
                 insert.setInt(5, 1000); insert.setLong(6, now); insert.executeUpdate();
@@ -166,6 +173,36 @@ public class RankedQueueIntegrationTest {
                 second.enqueue(Collections.singletonList(b), b, null, 0L, "solo", policy, rb);
                 fail("Suspended player must not queue");
             } catch (RankedQueueStore.Suspended expected) { assertTrue(expected.untilAt > now); }
+            try (Connection c = DriverManager.getConnection(url, user, password);
+                 Statement sql = c.createStatement()) {
+                sql.executeUpdate("INSERT INTO sbw_ranked_seasons VALUES('season-test','ACTIVE',"
+                    + (now - 1000) + "," + (now + 120000) + ",'solo')");
+                sql.executeUpdate("UPDATE sbw_ranked_season_control SET active_id='season-test',"
+                    + "policy_version=1 WHERE control_id=1");
+            }
+            assertNull("Old policy cannot queue after season switch", first.policyFor("solo"));
+            UUID stalePlayer = UUID.randomUUID();
+            try {
+                first.enqueue(Collections.singletonList(stalePlayer), stalePlayer,
+                    null, 0L, "solo", policy, Collections.singletonMap(stalePlayer, 1000));
+                fail("Stale context must be rejected");
+            } catch (IllegalStateException expected) { /* central version changed */ }
+            try (Connection c = DriverManager.getConnection(url, user, password);
+                 PreparedStatement update = c.prepareStatement(
+                    "UPDATE sbw_ranked_policy SET context='season-test',season_version=1,"
+                    + "updated_at=? WHERE server_id=?")) {
+                update.setLong(1, System.currentTimeMillis()); update.setString(2, server);
+                update.executeUpdate();
+            }
+            assertNotNull("Updated backend policy enables season", first.policyFor("solo"));
+            try (Connection c = DriverManager.getConnection(url, user, password);
+                 Statement sql = c.createStatement()) {
+                sql.executeUpdate("UPDATE sbw_ranked_seasons SET state='CLOSING'"
+                    + " WHERE season_id='season-test'");
+                sql.executeUpdate("UPDATE sbw_ranked_season_control SET policy_version=2"
+                    + " WHERE control_id=1");
+            }
+            assertNull("CLOSING closes the queue immediately", first.policyFor("solo"));
         } finally {
             try (Connection c = DriverManager.getConnection(url, user, password)) {
                 for (String table : Arrays.asList("sm_ranked_arena_leases", "sm_ranked_allocations",
@@ -184,6 +221,11 @@ public class RankedQueueIntegrationTest {
                         "DELETE FROM sbw_ranked_suspensions WHERE player_uuid IN (?,?)")) {
                     delete.setString(1, a.toString()); delete.setString(2, b.toString());
                     delete.executeUpdate();
+                }
+                try (Statement reset = c.createStatement()) {
+                    reset.executeUpdate("UPDATE sbw_ranked_season_control SET active_id=NULL,"
+                        + "policy_version=0 WHERE control_id=1");
+                    reset.executeUpdate("DELETE FROM sbw_ranked_seasons WHERE season_id='season-test'");
                 }
             }
         }

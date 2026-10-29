@@ -1,5 +1,9 @@
 # StarfinMinigames — Fase 1.2
 
+## Política sazonal do BedWars (Fase 6.3)
+
+O proxy lê o controle de temporada e `sbw_ranked_policy` no mesmo MySQL antes de inscrever, alocar ou transferir uma fila ranqueada. Contexto, versão, estado ACTIVE, datas e modalidade devem coincidir. Ao entrar em CLOSING, inscrições WAITING são canceladas sem penalidade; partidas já admitidas preservam o contexto no backend. A pré-temporada só pode formar novas partidas enquanto a versão central é zero. Atualize proxy e backends juntos antes de habilitar temporadas; consulte [RANKED_PHASE_6_3.md](../StarfinBedWars/RANKED_PHASE_6_3.md). Nenhuma temporada é ativada por esta atualização.
+
 ## Party e equipes (4.4.1)
 
 O proxy continua reservando uma arena para toda a Party. Cada reserva agora inclui
