@@ -23,9 +23,15 @@ final class BungeeSettings {
     final Map<String, String> serverNames;
     final Map<String, String> messages;
     final RankedMatchmakingSettings ranked;
+    final boolean tournamentsEnabled;
+    final String tournamentArenaGroup;
+    final int tournamentAllocationSeconds;
 
     BungeeSettings(Configuration yaml, Predicate<String> registeredServer) {
         ranked = new RankedMatchmakingSettings(yaml);
+        tournamentsEnabled = yaml.getBoolean("tournaments.enabled", false);
+        tournamentArenaGroup = yaml.getString("tournaments.arena-group", "tournament");
+        tournamentAllocationSeconds = yaml.getInt("tournaments.allocation-seconds", 90);
         networkEnabled = yaml.getBoolean("network.enabled", false);
         mysqlEnabled = yaml.getBoolean("mysql.enabled", false);
         matchmakingEnabled = yaml.getBoolean("matchmaking.enabled", true);
@@ -70,6 +76,8 @@ final class BungeeSettings {
                     || "CONTINUE".equals(partialTransferPolicy))
                 || !mysqlHost.matches("[A-Za-z0-9._:-]+")
                 || !mysqlDatabase.matches("[A-Za-z0-9_]+") || mysqlUser.isEmpty()
+                || !tournamentArenaGroup.matches("[a-z0-9_-]{1,32}")
+                || tournamentAllocationSeconds < 30 || tournamentAllocationSeconds > 600
                 || !("DISABLED".equals(sslMode) || "PREFERRED".equals(sslMode)
                     || "REQUIRED".equals(sslMode) || "VERIFY_CA".equals(sslMode)
                     || "VERIFY_IDENTITY".equals(sslMode)))

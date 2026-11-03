@@ -1,6 +1,7 @@
 package com.starfinplugins.minigames.bungee;
 
 import com.google.common.io.ByteArrayDataOutput;
+import com.google.common.io.ByteArrayDataInput;
 import com.google.common.io.ByteStreams;
 import com.starfinplugins.minigames.api.ReservationSnapshot;
 import java.io.IOException;
@@ -18,6 +19,10 @@ import net.md_5.bungee.api.chat.TextComponent;
 import net.md_5.bungee.api.config.ServerInfo;
 import net.md_5.bungee.api.connection.ProxiedPlayer;
 import net.md_5.bungee.api.event.PlayerDisconnectEvent;
+import net.md_5.bungee.api.event.PluginMessageEvent;
+import net.md_5.bungee.api.connection.Server;
+import com.starfinplugins.social.api.PartyService;
+import com.starfinplugins.social.api.PartyTransferPlan;
 import net.md_5.bungee.api.plugin.Listener;
 import net.md_5.bungee.api.plugin.Plugin;
 import net.md_5.bungee.event.EventHandler;
@@ -26,13 +31,16 @@ import net.md_5.bungee.api.scheduler.ScheduledTask;
 /** Bungee entry point; JDBC is confined to a bounded worker pool. */
 public final class StarfinMinigamesBungee extends Plugin implements Listener {
     private static final String SAME_SERVER_CHANNEL = "SMJoin";
+    private static final String TOURNAMENT_CHANNEL = "SMTournament";
     private volatile BungeeSettings settings;
     private volatile BungeeDatabase database;
     private ThreadPoolExecutor io;
     private ScheduledTask cleanup;
     private ScheduledTask rankedTick;
+    private ScheduledTask tournamentTick;
     private final UUID proxyId = UUID.randomUUID();
     private RankedQueueService rankedQueue;
+    private TournamentQueueService tournamentQueue;
     private final Map<UUID, ReservationSnapshot> transfers = new ConcurrentHashMap<UUID, ReservationSnapshot>();
     private final java.util.Set<UUID> inFlight = java.util.Collections.newSetFromMap(
         new ConcurrentHashMap<UUID, Boolean>());
@@ -50,9 +58,11 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
             getProxy().getPluginManager().registerCommand(this, new NetworkCommand(this));
             getProxy().getPluginManager().registerCommand(this, new JoinCommand(this));
             rankedQueue = new RankedQueueService(this, proxyId);
+            tournamentQueue = new TournamentQueueService(this);
             getProxy().getPluginManager().registerCommand(this, new RankedCommand(rankedQueue));
             getProxy().getPluginManager().registerListener(this, this);
             getProxy().registerChannel(SAME_SERVER_CHANNEL);
+            getProxy().registerChannel(TOURNAMENT_CHANNEL);
             if (settings.networkEnabled) {
                 submitIo(() -> {
                     try {
@@ -74,6 +84,8 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
                 }), 10, 10, TimeUnit.SECONDS);
                 rankedTick = getProxy().getScheduler().schedule(this,
                     () -> rankedQueue.tick(), 2, settings.ranked.heartbeatSeconds, TimeUnit.SECONDS);
+                tournamentTick = getProxy().getScheduler().schedule(this,
+                    () -> tournamentQueue.tick(), 3, 3, TimeUnit.SECONDS);
             } else getLogger().info("Catalogo desativado; comandos administrativos disponiveis.");
         } catch (Exception error) {
             getLogger().severe("StarfinMinigames-Bungee nao iniciou: " + error.getMessage());
@@ -87,9 +99,11 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
         stopping = true;
         if (cleanup != null) cleanup.cancel();
         if (rankedTick != null) rankedTick.cancel();
+        if (tournamentTick != null) tournamentTick.cancel();
         getProxy().getPluginManager().unregisterCommands(this);
         getProxy().getPluginManager().unregisterListeners(this);
         getProxy().unregisterChannel(SAME_SERVER_CHANNEL);
+        getProxy().unregisterChannel(TOURNAMENT_CHANNEL);
         if (io != null) {
             io.shutdown();
             try { if (!io.awaitTermination(5, TimeUnit.SECONDS)) io.shutdownNow(); }
@@ -258,6 +272,62 @@ public final class StarfinMinigamesBungee extends Plugin implements Listener {
         inFlight.remove(id);
         ReservationSnapshot reservation = transfers.remove(id);
         if (reservation != null) submitIo(() -> fail(reservation, true));
+    }
+
+    @EventHandler public void onTournamentRegistration(PluginMessageEvent event) {
+        if (!TOURNAMENT_CHANNEL.equals(event.getTag())
+                || !(event.getSender() instanceof Server)
+                || !(event.getReceiver() instanceof ProxiedPlayer)) return;
+        ProxiedPlayer player = (ProxiedPlayer) event.getReceiver();
+        if (player.getServer() != event.getSender()) return;
+        event.setCancelled(true);
+        UUID request;
+        try {
+            ByteArrayDataInput input = ByteStreams.newDataInput(event.getData());
+            if (!"register".equals(input.readUTF())) return;
+            request = UUID.fromString(input.readUTF());
+        } catch (RuntimeException invalid) { return; }
+        PartyService social = PartyJoinBridge.service(this);
+        if (social == null) {
+            answerTournament(player, request, "PARTY_UNAVAILABLE", java.util.Collections.emptyList());
+            return;
+        }
+        UUID leader = player.getUniqueId();
+        social.getParty(leader).whenComplete((initialParty, initialError) -> {
+            if (getProxy().getPlayer(leader) != player) return;
+            if (initialError != null) {
+                answerTournament(player, request, "PARTY_UNAVAILABLE", java.util.Collections.emptyList());
+                return;
+            }
+            if (initialParty == null) {
+                answerTournament(player, request, "OK", java.util.Collections.singletonList(leader));
+                return;
+            }
+            social.planTransfer(leader, "bedwars", 64).whenComplete((plan, error) -> {
+                if (getProxy().getPlayer(leader) != player) return;
+                if (error != null || plan == null || !plan.succeeded() || plan.value == null) {
+                    answerTournament(player, request, "LEADER_REQUIRED", java.util.Collections.emptyList());
+                    return;
+                }
+                PartyTransferPlan value = plan.value;
+                if (!initialParty.id.equals(value.partyId)
+                        || initialParty.size() != value.onlineMembers.size()
+                        || !value.onlineMembers.contains(leader)) {
+                    answerTournament(player, request, "PARTY_CHANGED", java.util.Collections.emptyList());
+                    return;
+                }
+                answerTournament(player, request, "OK", value.onlineMembers);
+            });
+        });
+    }
+
+    private void answerTournament(ProxiedPlayer player, UUID request, String status, List<UUID> members) {
+        if (player.getServer() == null) return;
+        ByteArrayDataOutput out = ByteStreams.newDataOutput();
+        out.writeUTF("register"); out.writeUTF(request.toString()); out.writeUTF(status);
+        out.writeInt(members.size());
+        for (UUID member : members) out.writeUTF(member.toString());
+        player.getServer().sendData(TOURNAMENT_CHANNEL, out.toByteArray());
     }
 
     String reloadSafeSettings() {

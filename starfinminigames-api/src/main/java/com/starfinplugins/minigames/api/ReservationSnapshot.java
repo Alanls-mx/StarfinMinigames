@@ -14,6 +14,7 @@ public final class ReservationSnapshot {
     private final String teamId;
     private final UUID rankedAllocationId;
     private final String competitiveContext;
+    private final UUID tournamentGameId, tournamentAllocationId;
 
     public ReservationSnapshot(UUID id, UUID playerId, String minigameId, String mode,
                                String serverId, UUID serverInstance, String arenaId,
@@ -38,11 +39,26 @@ public final class ReservationSnapshot {
                                UUID groupId, UUID partyId, UUID leaderId, long partyRevision,
                                int groupSize, String teamId, UUID rankedAllocationId,
                                String competitiveContext) {
+        this(id, playerId, minigameId, mode, serverId, serverInstance, arenaId,
+            state, createdAtMillis, expiresAtMillis, groupId, partyId, leaderId,
+            partyRevision, groupSize, teamId, rankedAllocationId, competitiveContext,
+            null, null);
+    }
+
+    public ReservationSnapshot(UUID id, UUID playerId, String minigameId, String mode,
+                               String serverId, UUID serverInstance, String arenaId,
+                               ReservationState state, long createdAtMillis, long expiresAtMillis,
+                               UUID groupId, UUID partyId, UUID leaderId, long partyRevision,
+                               int groupSize, String teamId, UUID rankedAllocationId,
+                               String competitiveContext, UUID tournamentGameId,
+                               UUID tournamentAllocationId) {
         if (id == null || playerId == null || serverInstance == null || state == null
                 || createdAtMillis < 0 || expiresAtMillis <= createdAtMillis
                 || groupSize < 1 || groupSize > 100 || (groupId == null && teamId != null)
                 || (rankedAllocationId == null) != (competitiveContext == null)
-                || (competitiveContext != null && !competitiveContext.matches("[a-z0-9_-]{1,32}")))
+                || (competitiveContext != null && !competitiveContext.matches("[a-z0-9_-]{1,32}"))
+                || (tournamentGameId == null) != (tournamentAllocationId == null)
+                || (rankedAllocationId != null && tournamentGameId != null))
             throw new IllegalArgumentException("invalid reservation");
         this.groupId = groupId;
         this.partyId = partyId;
@@ -52,6 +68,8 @@ public final class ReservationSnapshot {
         this.teamId = teamId;
         this.rankedAllocationId = rankedAllocationId;
         this.competitiveContext = competitiveContext;
+        this.tournamentGameId = tournamentGameId;
+        this.tournamentAllocationId = tournamentAllocationId;
         this.id = id;
         this.playerId = playerId;
         this.minigameId = Ids.stable(minigameId, "minigame id");
@@ -83,4 +101,7 @@ public final class ReservationSnapshot {
     public boolean isRanked() { return rankedAllocationId != null; }
     public UUID getRankedAllocationId() { return rankedAllocationId; }
     public String getCompetitiveContext() { return competitiveContext; }
+    public boolean isTournament() { return tournamentGameId != null; }
+    public UUID getTournamentGameId() { return tournamentGameId; }
+    public UUID getTournamentAllocationId() { return tournamentAllocationId; }
 }

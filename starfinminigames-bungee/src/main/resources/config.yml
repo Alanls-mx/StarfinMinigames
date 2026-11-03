@@ -50,6 +50,10 @@ ranked-matchmaking:
     stale-entry-seconds: 30
     transfer-seconds: 60
     allocation-seconds: 120
+tournaments:
+  enabled: false
+  arena-group: tournament
+  allocation-seconds: 90
 messages:
   prefix: '&b&lStarfin &8» '
   matchmaking-unavailable: '&cMatchmaking indisponivel neste momento.'

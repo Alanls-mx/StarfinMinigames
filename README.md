@@ -166,3 +166,7 @@ O proxy possui adaptador para BedWars; SkyWars/Murder precisam publicar catálog
 
 No servidor Spigot dedicado ao lobby principal, configure `lobby.prevent-hunger: true` em `plugins/StarfinMinigames/config.yml`. A opção restaura a barra de fome ao entrar e impede que ela diminua. Deixe-a desativada em servidores de jogo que já controlam a fome por partida.
 Ative também `lobby.level-spawn-view: true` para nivelar a visão ao entrar, renascer ou ser teleportado por outro plugin ao lobby; a direção horizontal permanece configurada.
+
+# Torneios BedWars (Fase 7.1)
+
+O proxy pode alocar jogos de torneio publicados pelo StarfinBedWars quando `tournaments.enabled: true` em `starfinminigames-bungee/src/main/resources/config.yml` e quando ambos apontam para o mesmo esquema MySQL. Configure `tournaments.arena-group` com o mesmo grupo do torneio no BedWars. O grupo deve ser exclusivo, com arenas vazias e capacidade para duas equipes completas. O proxy cria reservas por jogador vinculadas ao mesmo jogo/alocação, consulta o StarfinSocial para validar a Party na inscrição e transfere o elenco inteiro; ausência ou falha de transferência envia o jogo para revisão, sem walkover automático. A funcionalidade vem desativada por padrão. A integração com clientes Minecraft 1.8.8 permanece no roteiro `STARFINBEDWARS_FINAL_TEST_PLAN.md` do repositório StarfinBedWars.

@@ -45,6 +45,7 @@ final class BungeeDatabase implements AutoCloseable {
         try (Connection connection = created.getConnection()) {
             ReservationJdbc.ensureTable(connection);
             RankedQueueStore.ensureSchema(connection);
+            if (settings.tournamentsEnabled) TournamentQueueStore.ensureSchema(connection);
             // Fail fast on an incompatible or missing BedWars catalog.
             bedwars.read(connection, settings, System.currentTimeMillis());
         } catch (SQLException | RuntimeException error) {
@@ -66,7 +67,8 @@ final class BungeeDatabase implements AutoCloseable {
         List<NetworkArenaSnapshot> options = NetworkSelector.options(directory, settings.serverNames,
             gameId, mode, settings.preferExisting, settings.serverTimeoutSeconds * 1000L);
         for (NetworkArenaSnapshot option : options) {
-            if (settings.ranked.arenaGroups.contains(option.getGroup())) continue;
+            if (settings.ranked.arenaGroups.contains(option.getGroup())
+                    || settings.tournamentArenaGroup.equals(option.getGroup())) continue;
             ReservationSnapshot row = tryReserve(playerId, option);
             if (row != null) return row;
         }
@@ -91,7 +93,8 @@ final class BungeeDatabase implements AutoCloseable {
         List<NetworkArenaSnapshot> options = NetworkSelector.options(directory, settings.serverNames,
             gameId, mode, settings.preferExisting, settings.serverTimeoutSeconds * 1000L);
         for (NetworkArenaSnapshot option : options) {
-            if (settings.ranked.arenaGroups.contains(option.getGroup())) continue;
+            if (settings.ranked.arenaGroups.contains(option.getGroup())
+                    || settings.tournamentArenaGroup.equals(option.getGroup())) continue;
             List<ReservationSnapshot> rows = tryReserveGroup(ordered, option,
                 partyId, revision, leaderId);
             if (!rows.isEmpty()) return rows;
