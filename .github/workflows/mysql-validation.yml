@@ -1,0 +1,74 @@
+name: MySQL 8 validation
+on:
+  push:
+    branches: ["codex/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      SM_TEST_MYSQL_HOST: 127.0.0.1
+      SM_TEST_MYSQL_PORT: "3306"
+      SM_TEST_MYSQL_DATABASE: sbw_proxy_test_ci
+      SM_TEST_MYSQL_USER: root
+      SM_TEST_MYSQL_PASSWORD: ""
+      SM_RANKED_TEST_MYSQL_DATABASE: sbw_ranked_test_proxy_ci
+      SM_TOURNAMENT_TEST_MYSQL_DATABASE: sbw_tournament_proxy_test_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Alanls-mx/StarfinSocial
+          ref: codex/party-phase-4-1
+          path: deps/StarfinSocial
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+          cache: maven
+      - name: Build Spigot 1.8.8 locally with official BuildTools
+        run: |
+          mkdir -p "$RUNNER_TEMP/buildtools"
+          cd "$RUNNER_TEMP/buildtools"
+          curl -fsSL https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar -o BuildTools.jar
+          java -jar BuildTools.jar --rev 1.8.8
+      - name: Create marked disposable schemas
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq default-mysql-client
+          mysql -h 127.0.0.1 -uroot -e 'SELECT VERSION()'
+          for schema in sbw_proxy_test_ci sbw_ranked_test_proxy_ci sbw_tournament_proxy_test_ci; do
+            mysql -h 127.0.0.1 -uroot -e "CREATE DATABASE $schema; CREATE TABLE $schema.starfin_disposable_test_schema (marker VARCHAR(40) NOT NULL); INSERT INTO $schema.starfin_disposable_test_schema VALUES ('phase72-disposable-v1')"
+          done
+      - name: Build Social and Minigames with mandatory JDBC tests
+        run: |
+          set -o pipefail
+          java -version 2>&1 | tee build.log
+          mvn -version 2>&1 | tee -a build.log
+          echo "commit=$GITHUB_SHA branch=$GITHUB_REF_NAME" | tee -a build.log
+          mvn -B -ntp -f deps/StarfinSocial/pom.xml -pl starfinsocial-api -am clean install 2>&1 | tee -a build.log
+          mvn -B -ntp clean verify -DrequireIntegrationTests=true 2>&1 | tee -a build.log
+      - name: Verify reports, JAR contents and Java 8 bytecode
+        run: python3 ci/verify_build.py minigames
+      - name: Preserve reports and project artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-7-2-validation
+          if-no-files-found: warn
+          path: |
+            build.log
+            **/target/surefire-reports/
+            starfinminigames-*/target/StarfinMinigames*.jar

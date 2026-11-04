@@ -12,22 +12,23 @@ import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import net.md_5.bungee.config.Configuration;
-import org.junit.Assume;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
 /** Disposable-schema proof of all-or-nothing tournament allocation. */
 public class TournamentQueueStoreIntegrationTest {
     @Test public void allocatesFullRosterOnlyAndExcludesCasual() throws Exception {
-        String port = System.getenv("SM_TEST_MYSQL_PORT");
-        Assume.assumeTrue(System.getenv("SM_TEST_MYSQL_HOST") != null && port != null);
-        String host = System.getenv("SM_TEST_MYSQL_HOST");
-        String schema = System.getenv("SM_TEST_MYSQL_DATABASE");
-        String user = System.getenv("SM_TEST_MYSQL_USER");
-        String password = System.getenv("SM_TEST_MYSQL_PASSWORD");
-        String url = "jdbc:mysql://" + host + ":" + port + "/" + schema
-            + "?sslMode=DISABLED&allowPublicKeyRetrieval=true";
+        IntegrationMysql database = IntegrationMysql.load(
+            "SM_TOURNAMENT_TEST_MYSQL_DATABASE", "sbw_tournament_proxy_test_");
+        String host = database.host, schema = database.schema, user = database.user;
+        String password = database.password, url = database.url;
+        String port = Integer.toString(database.port);
         String server = "tour-" + UUID.randomUUID().toString().substring(0, 8);
         String tournament = "q" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         UUID instance = UUID.randomUUID(), firstTeam = UUID.randomUUID(),
@@ -143,7 +144,25 @@ public class TournamentQueueStoreIntegrationTest {
                     insert.setLong(3, System.currentTimeMillis()); insert.executeUpdate();
                 }
             }
-            TournamentQueueStore.Allocation allocation = store.allocate(request, arena, roster);
+            TournamentQueueStore.Allocation allocation;
+            try (BungeeDatabase rivalDb = new BungeeDatabase(settings)) {
+                TournamentQueueStore rival = new TournamentQueueStore(rivalDb, settings);
+                ExecutorService pool = Executors.newFixedThreadPool(2);
+                CountDownLatch start = new CountDownLatch(1);
+                try {
+                    Future<TournamentQueueStore.Allocation> firstAttempt = pool.submit(() -> {
+                        start.await(); return store.allocate(request, arena, roster);
+                    });
+                    Future<TournamentQueueStore.Allocation> secondAttempt = pool.submit(() -> {
+                        start.await(); return rival.allocate(request, arena, roster);
+                    });
+                    start.countDown();
+                    TournamentQueueStore.Allocation a = firstAttempt.get(20, TimeUnit.SECONDS);
+                    TournamentQueueStore.Allocation b = secondAttempt.get(20, TimeUnit.SECONDS);
+                    assertTrue("exactly one independent proxy may allocate", (a == null) != (b == null));
+                    allocation = a != null ? a : b;
+                } finally { pool.shutdownNow(); }
+            }
             assertNotNull(allocation); assertEquals(2, allocation.reservations.size());
             assertNull(store.allocate(request, arena, roster));
             for (ReservationSnapshot row : allocation.reservations) {

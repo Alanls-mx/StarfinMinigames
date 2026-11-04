@@ -16,22 +16,16 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import net.md_5.bungee.config.Configuration;
-import org.junit.Assume;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
 /** Runs only against an explicitly configured disposable MySQL/MariaDB schema. */
 public class BungeeDatabaseIntegrationTest {
     @Test public void concurrentReservationsRespectLastSlotAndClaimRequiresCorrectInstance() throws Exception {
-        String host = System.getenv("SM_TEST_MYSQL_HOST");
-        String port = System.getenv("SM_TEST_MYSQL_PORT");
-        String schema = System.getenv("SM_TEST_MYSQL_DATABASE");
-        String user = System.getenv("SM_TEST_MYSQL_USER");
-        String password = System.getenv("SM_TEST_MYSQL_PASSWORD");
-        Assume.assumeTrue("requires disposable MySQL schema", host != null && schema != null && user != null);
-        int mysqlPort = port == null ? 3306 : Integer.parseInt(port);
-        String url = "jdbc:mysql://" + host + ":" + mysqlPort + "/" + schema
-            + "?sslMode=DISABLED&allowPublicKeyRetrieval=true";
+        IntegrationMysql target = IntegrationMysql.load(null, "sbw_proxy_test_");
+        String host = target.host, schema = target.schema, user = target.user;
+        String password = target.password, url = target.url;
+        int mysqlPort = target.port;
         String serverId = "test-" + UUID.randomUUID().toString().substring(0, 8);
         UUID instance = UUID.randomUUID();
         long now = System.currentTimeMillis();

@@ -1,5 +1,7 @@
 # StarfinMinigames — Fase 1.2
 
+A validação MySQL 8 da Fase 7.2 usa schemas descartáveis marcados, `-DrequireIntegrationTests=true` e o [workflow](.github/workflows/mysql-validation.yml). O comando `python ci/verify_build.py minigames` exige as três suítes JDBC, zero skips e JARs completos com bytecode Java 8. O [guia do ambiente](https://github.com/Alanls-mx/StarfinBedWars/blob/codex/validation-phase-7-2/MYSQL_INTEGRATION_TESTING.md) fica no StarfinBedWars.
+
 ## Política sazonal do BedWars (Fase 6.3)
 
 O proxy lê o controle de temporada e `sbw_ranked_policy` no mesmo MySQL antes de inscrever, alocar ou transferir uma fila ranqueada. Contexto, versão, estado ACTIVE, datas e modalidade devem coincidir. Ao entrar em CLOSING, inscrições WAITING são canceladas sem penalidade; partidas já admitidas preservam o contexto no backend. A pré-temporada só pode formar novas partidas enquanto a versão central é zero. Atualize proxy e backends juntos antes de habilitar temporadas; consulte [RANKED_PHASE_6_3.md](../StarfinBedWars/RANKED_PHASE_6_3.md). Nenhuma temporada é ativada por esta atualização.

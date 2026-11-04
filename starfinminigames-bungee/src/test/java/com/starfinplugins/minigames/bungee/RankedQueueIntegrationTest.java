@@ -14,22 +14,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import net.md_5.bungee.config.Configuration;
-import org.junit.Assume;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
 /** Opt-in only: SM_TEST_MYSQL_DATABASE must name an explicitly disposable schema. */
 public class RankedQueueIntegrationTest {
     @Test public void queueAllocationIsAtomicAndCasualCannotConsumeRankedArena() throws Exception {
-        String host = System.getenv("SM_TEST_MYSQL_HOST");
-        String schema = System.getenv("SM_TEST_MYSQL_DATABASE");
-        String user = System.getenv("SM_TEST_MYSQL_USER");
-        Assume.assumeTrue(schema != null && schema.startsWith("sbw_ranked_test_")
-            && host != null && user != null);
-        int port = Integer.parseInt(System.getenv("SM_TEST_MYSQL_PORT"));
-        String password = System.getenv("SM_TEST_MYSQL_PASSWORD");
-        String url = "jdbc:mysql://" + host + ":" + port + "/" + schema
-            + "?sslMode=DISABLED&allowPublicKeyRetrieval=true";
+        IntegrationMysql database = IntegrationMysql.load(
+            "SM_RANKED_TEST_MYSQL_DATABASE", "sbw_ranked_test_");
+        String host = database.host, schema = database.schema, user = database.user;
+        int port = database.port;
+        String password = database.password, url = database.url;
         String server = "r62-" + UUID.randomUUID().toString().substring(0, 8);
         UUID instance = UUID.randomUUID();
         long now = System.currentTimeMillis();
