@@ -12,6 +12,7 @@
   </properties>
   <repositories>
     <repository><id>spigot-repo</id><url>https://hub.spigotmc.org/nexus/content/repositories/snapshots/</url></repository>
+    <repository><id>spigot-public</id><url>https://hub.spigotmc.org/nexus/content/repositories/public/</url></repository>
   </repositories>
   <dependencyManagement><dependencies>
     <dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>4.13.2</version><scope>test</scope></dependency>

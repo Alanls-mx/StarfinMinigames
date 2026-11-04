@@ -45,7 +45,9 @@ ARCHIVES = {
 
 
 def verify_reports(root, project):
-    reports = list(root.rglob("target/surefire-reports/TEST-*.xml"))
+    reports = (list((root / "target/surefire-reports").glob("TEST-*.xml"))
+               if project == "bedwars" else
+               list(root.glob("starfinminigames-*/target/surefire-reports/TEST-*.xml")))
     if not reports:
         raise AssertionError("No Surefire XML reports")
     found = set()
